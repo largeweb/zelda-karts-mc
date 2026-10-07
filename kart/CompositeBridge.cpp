@@ -527,7 +527,12 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     u16 norm;
     guLookAtF(look.mf, x, y, z, x - std::sin(yaw) * std::cos(pitch) * 100, y - std::sin(pitch) * 100,
               z + std::cos(yaw) * std::cos(pitch) * 100, 0, 1, 0);
-    guPerspectiveF(projection.mf, &norm, v.fov, gScreenAspect, props->NearPersp, props->FarPersp, 1.0f);
+    // The game clips away anything within several units of the camera (over a block on
+    // some tracks), which on foot reads as seeing through nearby walls and ground. Clip
+    // as close as Minecraft does instead.
+    const float nearPlane = 0.05f * BLOCK;
+    guPerspectiveF(projection.mf, &norm, v.fov, gScreenAspect, nearPlane, props->FarPersp, 1.0f);
+    renderedNear = nearPlane * K;
     replacements[lookAtMatrix] = look;
     replacements[perspectiveMatrix] = projection;
     renderedCamera = { v.epoch, v.x, v.y, v.z, v.yaw, v.pitch, v.fov, 1, acquire(shared + CAMERA), port.scene, 1.0f };

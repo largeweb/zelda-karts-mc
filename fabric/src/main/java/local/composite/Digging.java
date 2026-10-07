@@ -49,7 +49,7 @@ public final class Digging {
   */
  private static final Map<Long,float[]> planes=new ConcurrentHashMap<>();
  private static final Map<Long,net.minecraft.world.phys.shapes.VoxelShape> shapes=new ConcurrentHashMap<>();
- private static final int CLASSIFY_PLANES=5700;private static boolean planesDirty=true;
+ private static final int CLASSIFY_PLANES=5700;private static boolean refreshDisplays;
  private static final int HIT=4608,CLASSIFY_REQUEST=4672,CLASSIFY_REPLY=4928,CLASSIFY_MAX=16;
  private static final int CARVED_GRID=5120,GRID=16;
  private static Path file;private static boolean loaded,dirty;private static int ticks;
@@ -79,7 +79,7 @@ public final class Digging {
   */
  public static ByteBuffer mapIfChanged(BlockPos player){
   if(mapX==Integer.MIN_VALUE||Math.abs(player.getX()-(mapX+MAP/2))>MAP/4||Math.abs(player.getZ()-(mapZ+MAP/2))>MAP/4||Math.abs(player.getY()-(mapY+LAYERS/2))>LAYERS/4){
-   mapX=player.getX()-MAP/2;mapZ=player.getZ()-MAP/2;mapY=player.getY()-LAYERS/2;mapDirty=true;planesDirty=true;
+   mapX=player.getX()-MAP/2;mapZ=player.getZ()-MAP/2;mapY=player.getY()-LAYERS/2;mapDirty=true;
   }
   if(!mapDirty)return null;
   mapDirty=false;
@@ -95,29 +95,75 @@ public final class Digging {
  }
 
  /**
-  * The planes around the player for the shader, or null when unchanged: MAP wide, and one
-  * MAP-deep strip per layer stacked downwards, four floats per cell. Call after mapIfChanged.
+  * Show the solid part of a scenery cell beside a dig: block displays, squashed to fit
+  * behind the cell's surface. They are ordinary Minecraft rendering, so they look like
+  * the blocks lining the dig at any distance, and the game's surface still covers them
+  * from outside. They have no hitbox; solidPart() is what the player collides with.
   */
- public static ByteBuffer planesIfChanged(){
-  if(!planesDirty)return null;
-  planesDirty=false;
-  var bytes=ByteBuffer.allocateDirect(MAP*MAP*LAYERS*16).order(ByteOrder.nativeOrder());
-  var floats=bytes.asFloatBuffer();
-  for(var e:planes.entrySet()){
-   long key=e.getKey();int x=BlockPos.getX(key)-mapX,y=BlockPos.getY(key)-mapY,z=BlockPos.getZ(key)-mapZ;
-   if(x<0||x>=MAP||z<0||z>=MAP||y<0||y>=LAYERS||kind(cells.get(key))!=SURFACE)continue;
-   // The normal's length carries what the cell is made of: 1 soil, 2 stone, 3 sand.
-   int material=(cells.get(key)>>MATERIAL_SHIFT)&0xff,code=material==1?3:material==2||material==12?2:1;
-   var plane=e.getValue();
-   floats.put(((y*MAP+z)*MAP+x)*4,new float[]{plane[0]*code,plane[1]*code,plane[2]*code,plane[3]});
+ private static void showSolidPart(ServerLevel level,BlockPos pos,float[] plane,Block block){
+  var name=net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block).toString();
+  var source=level.getServer().createCommandSourceStack().withSuppressedOutput();
+  // Whole-number coordinates in a command mean the middle of the block; these are its corner.
+  for(double[] box:pieces(plane,2,true)){
+   var command=String.format(java.util.Locale.ROOT,
+    "execute in composite:zelda run summon minecraft:block_display %d.0 %d.0 %d.0 {block_state:\"%s\",brightness:{sky:15,block:0},Tags:[\"hyrule_partial\",\"%s\"],"
+    +"transformation:{translation:[%.4ff,%.4ff,%.4ff],scale:[%.4ff,%.4ff,%.4ff],left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f]}}",
+    pos.getX(),pos.getY(),pos.getZ(),name,tag(pos),box[0],box[1],box[2],box[3]-box[0],box[4]-box[1],box[5]-box[2]);
+   level.getServer().getCommands().performPrefixedCommand(source,command);
   }
-  return bytes;
+ }
+ private static void hideSolidPart(ServerLevel level,BlockPos pos){
+  level.getServer().getCommands().performPrefixedCommand(level.getServer().createCommandSourceStack().withSuppressedOutput(),
+   "execute in composite:zelda run kill @e[type=minecraft:block_display,tag="+tag(pos)+"]");
+ }
+ private static String tag(BlockPos pos){return "hp_"+pos.getX()+"_"+pos.getY()+"_"+pos.getZ();}
+ /**
+  * The part of a cell behind a plane as boxes {x0,y0,z0,x1,y1,z1} in the cell's 0..1
+  * coordinates: an n by n bundle of columns along the axis the surface faces most, each
+  * filled as far as the surface. Cautious columns stop at the surface's lowest point
+  * across the column, so nothing shows through it; otherwise at its middle.
+  */
+ private static List<double[]> pieces(float[] plane,int n,boolean cautious){
+  var boxes=new ArrayList<double[]>();
+  int axis=Math.abs(plane[1])>=Math.abs(plane[0])&&Math.abs(plane[1])>=Math.abs(plane[2])?1:Math.abs(plane[0])>=Math.abs(plane[2])?0:2;
+  int a=axis==0?1:0,b=axis==2?1:2; // the two axes across the columns
+  for(int i=0;i<n;i++)for(int j=0;j<n;j++){
+   double u0=(double)i/n,u1=(i+1.0)/n,v0=(double)j/n,v1=(j+1.0)/n;
+   // Where the plane crosses the column: n.p = d, solved for the main axis.
+   double centre=(plane[3]-plane[a]*(u0+u1)/2-plane[b]*(v0+v1)/2)/plane[axis],cut=centre;
+   if(cautious)for(double u:new double[]{u0,u1})for(double v:new double[]{v0,v1}){
+    double corner=(plane[3]-plane[a]*u-plane[b]*v)/plane[axis];
+    cut=plane[axis]>0?Math.min(cut,corner):Math.max(cut,corner);
+   }
+   cut=Math.clamp(cut,0,1);
+   double from=plane[axis]>0?0:cut,to=plane[axis]>0?cut:1;
+   if(to-from<.02)continue;
+   double[] lo=new double[3],hi=new double[3];
+   lo[axis]=from;hi[axis]=to;lo[a]=u0;hi[a]=u1;lo[b]=v0;hi[b]=v1;
+   boxes.add(new double[]{lo[0],lo[1],lo[2],hi[0],hi[1],hi[2]});
+  }
+  return boxes;
  }
 
  // --- client: per tick ------------------------------------------------------------
  public static void tick(Minecraft mc,Shared shm,int epoch){
   var server=mc.getSingleplayerServer();if(server==null||mc.player==null)return;
   load(server.getWorldPath(LevelResource.ROOT));
+  if(refreshDisplays){
+   // Once per world load: make sure every scenery cell beside a dig has its displays
+   // (worlds dug before displays existed have none).
+   refreshDisplays=false;
+   var all=new ArrayList<>(planes.entrySet());
+   server.execute(()->{
+    var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
+    for(var e:all){
+     Integer cell=cells.get(e.getKey());if(kind(cell)!=SURFACE)continue;
+     var pos=BlockPos.of(e.getKey());
+     hideSolidPart(level,pos);
+     showSolidPart(level,pos,e.getValue(),(cell&DEPTH)>=DEPTH_STONE?Blocks.STONE:subsoil((cell>>MATERIAL_SHIFT)&0xff));
+    }
+   });
+  }
   publishCarved(mc,shm,epoch);
   mine(mc,shm,epoch);
   classify(mc,shm,epoch);
@@ -165,26 +211,14 @@ public final class Digging {
   }
   return shapes;
  }
- /** The part of a scenery cell behind its surface, as a shape built from quarter-block pieces. */
+ /** The part of a scenery cell behind its surface, as a collision shape of quarter-block columns. */
  private static net.minecraft.world.phys.shapes.VoxelShape solidPart(long key){
   var plane=planes.get(key);
   if(plane==null)return null;
   return shapes.computeIfAbsent(key,k->{
    var shape=net.minecraft.world.phys.shapes.Shapes.empty();
-   final int n=4;
-   // Columns along the axis the surface faces most, each filled as far as the surface.
-   int axis=Math.abs(plane[1])>=Math.abs(plane[0])&&Math.abs(plane[1])>=Math.abs(plane[2])?1:Math.abs(plane[0])>=Math.abs(plane[2])?0:2;
-   for(int i=0;i<n;i++)for(int j=0;j<n;j++){
-    double u=(i+.5)/n,v=(j+.5)/n;
-    // Where the plane crosses this column: n.p = d, solved for the main axis.
-    double rest=axis==1?plane[0]*u+plane[2]*v:axis==0?plane[1]*u+plane[2]*v:plane[0]*u+plane[1]*v;
-    double cut=Math.clamp((plane[3]-rest)/plane[axis],0,1);
-    double from=plane[axis]>0?0:cut,to=plane[axis]>0?cut:1;
-    if(to-from<.02)continue;
-    double u0=(double)i/n,u1=(i+1.0)/n,v0=(double)j/n,v1=(j+1.0)/n;
-    var box=axis==1?new net.minecraft.world.phys.AABB(u0,from,v0,u1,to,v1):axis==0?new net.minecraft.world.phys.AABB(from,u0,v0,to,u1,v1):new net.minecraft.world.phys.AABB(u0,v0,from,u1,v1,to);
-    shape=net.minecraft.world.phys.shapes.Shapes.or(shape,net.minecraft.world.phys.shapes.Shapes.create(box));
-   }
+   for(double[] box:pieces(plane,4,false))
+    shape=net.minecraft.world.phys.shapes.Shapes.or(shape,net.minecraft.world.phys.shapes.Shapes.create(new net.minecraft.world.phys.AABB(box[0],box[1],box[2],box[3],box[4],box[5])));
    return shape;
   });
  }
@@ -243,6 +277,7 @@ public final class Digging {
   server.execute(()->{
    var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
    var existing=level.getBlockState(pos);
+   if(planes.remove(pos.asLong())!=null){shapes.remove(pos.asLong());hideSolidPart(level,pos);}
    carve(pos,0,m);
    // A block already lying under this surface goes with it, in one break.
    boolean real=!existing.isAir()&&!existing.is(Blocks.BARRIER);
@@ -257,7 +292,7 @@ public final class Digging {
   Integer old=cells.get(pos.asLong());
   if(old!=null&&(old&DEPTH)!=0){depth=old&DEPTH;material=(old>>MATERIAL_SHIFT)&0xff;}
   cells.put(pos.asLong(),depth|material<<MATERIAL_SHIFT|CARVED|(kind(old)==FILLED?WAS_FILLED:0));
-  mapDirty=true;gridDirty=true;planesDirty=true;dirty=true;
+  mapDirty=true;gridDirty=true;dirty=true;
   for(var direction:Direction.values()){
    var next=pos.relative(direction);
    if(!cells.containsKey(next.asLong()))queue.add(new Pending(next.immutable(),Math.min(depth+1,DEPTH),material));
@@ -273,7 +308,7 @@ public final class Digging {
     return;
    }
    var answered=asked;asked=List.of();
-   var fill=new ArrayList<Pending>();
+   var fill=new ArrayList<Pending>();var partial=new ArrayList<Pending>();
    for(int i=0;i<answered.size();i++){
     var p=answered.get(i);int answer=Byte.toUnsignedInt(shm.mem.get(CLASSIFY_REPLY+4+i)),base=p.depth()|p.material()<<MATERIAL_SHIFT;
     if(answer==1)fill.add(p); // solid: becomes a real block below
@@ -282,13 +317,14 @@ public final class Digging {
     else if(cells.putIfAbsent(p.pos().asLong(),base|SURFACE|(answer<3?0:Math.max(1,answer-3))<<HEIGHT_SHIFT)==null){
      int o=CLASSIFY_PLANES+i*16;
      float[] plane={shm.mem.getFloat(o),shm.mem.getFloat(o+4),shm.mem.getFloat(o+8),shm.mem.getFloat(o+12)};
-     if(plane[0]!=0||plane[1]!=0||plane[2]!=0){planes.put(p.pos().asLong(),plane);planesDirty=true;}
+     if(plane[0]!=0||plane[1]!=0||plane[2]!=0){planes.put(p.pos().asLong(),plane);partial.add(p);}
     }
     dirty=true;
    }
    var server=mc.getSingleplayerServer();
-   if(!fill.isEmpty())server.execute(()->{
+   if(!fill.isEmpty()||!partial.isEmpty())server.execute(()->{
     var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
+    for(var p:partial)showSolidPart(level,p.pos(),planes.get(p.pos().asLong()),p.depth()>=DEPTH_STONE?Blocks.STONE:subsoil(p.material()));
     for(var p:fill){
      if(cells.putIfAbsent(p.pos().asLong(),p.depth()|p.material()<<MATERIAL_SHIFT)!=null)continue;
      dirty=true;
@@ -368,7 +404,7 @@ public final class Digging {
  private static void load(Path world){
   var path=world.resolve("hyrule-digging.dat");
   if(loaded&&path.equals(file))return;
-  cells.clear();planes.clear();shapes.clear();queue.clear();asked=List.of();file=path;loaded=true;mapDirty=true;planesDirty=true;dirty=false;
+  cells.clear();planes.clear();shapes.clear();queue.clear();asked=List.of();file=path;loaded=true;mapDirty=true;dirty=false;refreshDisplays=true;
   if(!Files.isRegularFile(path))return;
   try(var in=new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))){
    if(in.readInt()!=4)return; // an earlier layout: those digs keep their blocks but lose their openings
