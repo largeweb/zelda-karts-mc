@@ -44,6 +44,9 @@ constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, CAMERA = 1280, CAMERA_Q
               FLOOR = 1536, DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16, CARVED = 5120,
               CARVED_SIDE = 16;
 constexpr uint8_t CELL_OPEN = 0, CELL_SOLID = 1, CELL_SURFACE_NO_FLOOR = 2, CELL_SURFACE_FLOOR = 3;
+constexpr int CLASSIFY_PLANES = 5700;
+// A surface through a cell as a plane in the cell's own 0..1 coordinates; behind it is solid.
+struct CellPlane { float nx, ny, nz, d; };
 // Controls from Minecraft, and requests: a character number mounts a kart of that
 // character at the player; MOUNT and DISMOUNT get on and off the kart that is there.
 constexpr uint32_t KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_JUMP = 16, KEY_A = 1 << 19, KEY_SNEAK = 1 << 28;
@@ -261,7 +264,8 @@ void publishAim() {
     write(shared, DIG_HIT, out);
 }
 // Is a block cell open air, solid, or crossed by the track's surfaces?
-uint8_t classify(int cx, int cy, int cz) {
+uint8_t classify(int cx, int cy, int cz, CellPlane* plane) {
+    *plane = {};
     const float size = UNITS_PER_BLOCK, lo = 0.05f * size, hi = size - lo;
     float bx = cx * size, by = cy * size, bz = cz * size;
     Hit hit{};
@@ -274,6 +278,7 @@ uint8_t classify(int cx, int cy, int cz) {
             a[(axis + 1) % 3] += u, b[(axis + 1) % 3] += u;
             a[(axis + 2) % 3] += v, b[(axis + 2) % 3] += v;
             crossed = segment(a[0], a[1], a[2], b[0], b[1], b[2], &hit, false) || segment(b[0], b[1], b[2], a[0], a[1], a[2], &hit, false);
+            if (crossed) *plane = { hit.nx, hit.ny, hit.nz, (hit.nx * (hit.x - bx) + hit.ny * (hit.y - by) + hit.nz * (hit.z - bz)) / size };
         }
     float mx = bx + size / 2, mz = bz + size / 2;
     if (crossed) {
@@ -289,8 +294,11 @@ void serviceClassify() {
     std::memcpy(&request, shared + CLASSIFY_REQUEST + 4, sizeof(request));
     if (serial != acquire(shared + CLASSIFY_REQUEST)) return;
     uint8_t classes[CLASSIFY_MAX]{};
+    CellPlane planes[CLASSIFY_MAX]{};
     if (request.epoch == port.epoch && request.count <= CLASSIFY_MAX)
-        for (uint32_t i = 0; i < request.count; i++) classes[i] = classify(request.cells[i][0], request.cells[i][1], request.cells[i][2]);
+        for (uint32_t i = 0; i < request.count; i++)
+            classes[i] = classify(request.cells[i][0], request.cells[i][1], request.cells[i][2], &planes[i]);
+    std::memcpy(shared + CLASSIFY_PLANES, planes, sizeof(planes));
     std::memcpy(shared + CLASSIFY_REPLY + 4, classes, sizeof(classes));
     release(shared + CLASSIFY_REPLY, serial);
 }

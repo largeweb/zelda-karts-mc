@@ -47,7 +47,12 @@ constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 12
 // Digging. Minecraft tells Zelda which cells have been dug out (CARVED); Zelda tells
 // Minecraft what the crosshair hits (DIG_HIT) and answers questions about whether cells
 // are open air, solid, or have scenery passing through them (CLASSIFY).
-constexpr int DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16, CARVED = 5120, CARVED_SIDE = 16;
+constexpr int DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16, CARVED = 5120, CARVED_SIDE = 16,
+              CLASSIFY_PLANES = 5700;
+// For a cell with scenery through it: that surface as a plane in the cell's own 0..1
+// coordinates (normal towards the open side, and its offset). What lies behind the
+// plane is the solid part of the cell, which Minecraft draws and collides with.
+struct CellPlane { float nx, ny, nz, d; };
 // Answers to "what is in this cell": open air, solid, or scenery passing through it.
 // A surface cell also says how far up the cell its floor is (3..255 = 0..1), or that it
 // has none (a wall or ceiling runs through it).
@@ -303,8 +308,9 @@ void publishDigHit() {
 // with blocks only where the answer is solid, and treats cells with scenery through
 // them as solid until they are dug too. Scenery is a hollow shell, so "solid" means no
 // surface runs through the cell and there is no floor anywhere beneath it.
-uint8_t classify(int cx, int cy, int cz) {
+uint8_t classify(int cx, int cy, int cz, CellPlane* plane) {
     const float lo = 2, hi = SCALE - 2;
+    *plane = {};
     Vec3f base{ cx * SCALE, cy * SCALE, cz * SCALE };
     bool crossed = false;
     // A 3x3 bundle of lines along each axis, so a surface that only clips a corner counts.
@@ -321,6 +327,10 @@ uint8_t classify(int cx, int cy, int cz) {
             // Surfaces are one-sided, so look along each line in both directions.
             crossed = BgCheck_EntityLineTest1(&gPlayState->colCtx, &a, &b, &hit, &poly, true, true, true, true, &bg) ||
                       BgCheck_EntityLineTest1(&gPlayState->colCtx, &b, &a, &hit, &poly, true, true, true, true, &bg);
+            if (crossed && poly) {
+                float nx = poly->normal.x / 32767.0f, ny = poly->normal.y / 32767.0f, nz = poly->normal.z / 32767.0f;
+                *plane = { nx, ny, nz, (nx * (hit.x - base.x) + ny * (hit.y - base.y) + nz * (hit.z - base.z)) / SCALE };
+            }
         }
     Vec3f centre{ base.x + SCALE / 2, base.y + SCALE / 2, base.z + SCALE / 2 }, top{ centre.x, base.y + SCALE - 1, centre.z };
     CollisionPoly* floor = nullptr;
@@ -340,14 +350,16 @@ void serviceClassify() {
     std::memcpy(&request, shared + CLASSIFY_REQUEST + 4, sizeof(request));
     if (serial != acquire(shared + CLASSIFY_REQUEST)) return;
     uint8_t classes[CLASSIFY_MAX]{};
+    CellPlane planes[CLASSIFY_MAX]{};
     if (request.epoch == port.epoch && request.count <= CLASSIFY_MAX) {
         CubeQueryGuard cubes;
         for (uint32_t i = 0; i < request.count; i++) {
             auto& c = request.cells[i];
             bool sane = std::abs(c[0]) < 2000 && std::abs(c[1]) < 2000 && std::abs(c[2]) < 2000;
-            classes[i] = sane ? classify(c[0], c[1], c[2]) : CELL_OPEN;
+            classes[i] = sane ? classify(c[0], c[1], c[2], &planes[i]) : CELL_OPEN;
         }
     }
+    std::memcpy(shared + CLASSIFY_PLANES, planes, sizeof(planes));
     std::memcpy(shared + CLASSIFY_REPLY + 4, classes, sizeof(classes));
     release(shared + CLASSIFY_REPLY, serial);
 }

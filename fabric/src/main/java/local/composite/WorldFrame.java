@@ -24,11 +24,11 @@ public final class WorldFrame {
  public static final RenderPipeline PIPELINE=RenderPipeline.builder()
   .withLocation(Identifier.parse("hyrule:pipeline/zelda_frame"))
   .withVertexShader(Identifier.parse("hyrule:core/zelda_frame")).withFragmentShader(Identifier.parse("hyrule:core/zelda_frame"))
-  .withBindGroupLayout(BindGroupLayout.builder().withUniform("ZeldaColor",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("ZeldaDepth",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Carve",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Params",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Cracks",UniformType.COMBINED_IMAGE_SAMPLER).build())
+  .withBindGroupLayout(BindGroupLayout.builder().withUniform("ZeldaColor",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("ZeldaDepth",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Carve",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Params",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Cracks",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Planes",UniformType.COMBINED_IMAGE_SAMPLER).build())
   .withPrimitiveTopology(PrimitiveTopology.TRIANGLES).withCull(false).withColorTargetState(ColorTargetState.DEFAULT)
   .withDepthStencilState(new DepthStencilState(CompareOp.ALWAYS_PASS,true)).build();
  static final VarHandle INT=MethodHandles.byteBufferViewVarHandle(int[].class,ByteOrder.LITTLE_ENDIAN);
- static MappedByteBuffer map;static FileChannel file;static TextureTarget color,depth,carve,params;
+ static MappedByteBuffer map;static FileChannel file;static TextureTarget color,depth,carve,params,planes;
  /** Far plane Minecraft renders with while composited. */
  public static float far=1024;
  private static final int PARAMS=24;
@@ -70,6 +70,9 @@ public final class WorldFrame {
   var mc=Minecraft.getInstance();
   var grid=mc.player==null?null:Digging.mapIfChanged(mc.player.blockPosition());
   if(grid!=null)encoder.writeToTexture(carve.getColorTexture(),grid,0,0,0,0,64,64);
+  if(planes==null)planes=new TextureTarget("Scenery cell surfaces",64,64*24,GpuFormat.RGBA32_FLOAT,null);
+  var surfaces=mc.player==null?null:Digging.planesIfChanged();
+  if(surfaces!=null)encoder.writeToTexture(planes.getColorTexture(),surfaces,0,0,0,0,64,64*24);
   var f=paramBytes.asFloatBuffer();
   boolean enabled=camera!=null&&Digging.any()&&Passthrough.interactive();
   if(enabled){
@@ -111,7 +114,7 @@ public final class WorldFrame {
     pass.setPipeline(pipeline);var sampler=RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
     pass.setUniform("ZeldaColor",color.getColorTextureView(),sampler);pass.setUniform("ZeldaDepth",depth.getColorTextureView(),sampler);
     pass.setUniform("Carve",carve.getColorTextureView(),sampler);pass.setUniform("Params",params.getColorTextureView(),sampler);
-    pass.setUniform("Cracks",cracks.getTextureView(),sampler);
+    pass.setUniform("Cracks",cracks.getTextureView(),sampler);pass.setUniform("Planes",planes.getColorTextureView(),sampler);
     pass.draw(3,1,0,0);
    }
   }else{
