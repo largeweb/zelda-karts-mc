@@ -124,7 +124,7 @@ public final class Passthrough {
   float[] r=shared.collide(epoch,(float)((pos.x-origin())*SCALE),(float)((pos.y-BASE)*SCALE),(float)(pos.z*SCALE),(float)(nativeMove.x*SCALE),(float)(nativeMove.y*SCALE),(float)(nativeMove.z*SCALE));
   if(r==null){player.setDeltaMovement(Vec3.ZERO);return true;}
   Vec3 actual=new Vec3(r[0]/SCALE,r[1]/SCALE,r[2]/SCALE);
-  actual=net.minecraft.world.entity.Entity.collideBoundingBox(player,actual,player.getBoundingBox(),player.level(),List.of());player.setPos(pos.add(actual));
+  actual=net.minecraft.world.entity.Entity.collideBoundingBox(player,actual,player.getBoundingBox(),player.level(),Digging.solids(player));player.setPos(pos.add(actual));
   boolean y=Math.abs(actual.y-desired.y)>1e-5,x=Math.abs(actual.x-desired.x)>1e-5,z=Math.abs(actual.z-desired.z)>1e-5;
   player.moveDist+=(float)actual.horizontalDistance()*.6f;player.flyDist+=(float)actual.length()*.6f;
   player.horizontalCollision=x||z;player.verticalCollision=y;player.setOnGround(y&&desired.y<0);

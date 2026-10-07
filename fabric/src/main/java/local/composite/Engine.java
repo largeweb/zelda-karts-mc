@@ -47,6 +47,8 @@ public final class Engine {
   env.put("SHIP_HOME",home.toString());env.put("SDL_VIDEODRIVER","x11");
   env.put("COMPOSITE_SHM",shm);env.put("COMPOSITE_FRAME",shm+".rgba");
   var arms=Games.config().get("arms");if(arms!=null)env.put("COMPOSITE_ARMS",arms.getAsString());
+  // For testing: begin at a chosen entrance instead of where the save resumes.
+  var entrance=Games.config().get("start");if(entrance!=null)env.put("COMPOSITE_START",entrance.getAsString());
   var log=new File(home.toFile(),"engine.log");
   builder.redirectErrorStream(true).redirectOutput(log);
   process=builder.start();

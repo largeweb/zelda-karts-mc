@@ -44,13 +44,18 @@ using namespace composite;
 // Offsets beyond Protocol.h's legacy layout; mirrored by the Fabric mod.
 constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,
               COMBAT = 1408, FLOOR = 1536, ENEMIES = 1888;
-// Digging. Minecraft tells Zelda which of its collision to ignore around the player
-// (bits at DIG_MODE) because dug-out space is bounded by Minecraft blocks instead.
-// Zelda tells Minecraft what the crosshair hits (DIG_HIT) and answers questions about
-// whether cells are open air, solid, or have scenery passing through them (CLASSIFY).
-constexpr int DIG_MODE = 8, DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16;
-constexpr uint32_t DIG_NO_FLOOR = 1, DIG_NO_WALLS = 2, DIG_NO_CEILING = 4;
-enum CellClass : uint8_t { CELL_OPEN = 0, CELL_SOLID = 1, CELL_SURFACE = 2 };
+// Digging. Minecraft tells Zelda which cells have been dug out (CARVED); Zelda tells
+// Minecraft what the crosshair hits (DIG_HIT) and answers questions about whether cells
+// are open air, solid, or have scenery passing through them (CLASSIFY).
+constexpr int DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16, CARVED = 5120, CARVED_SIDE = 16;
+// Answers to "what is in this cell": open air, solid, or scenery passing through it.
+// A surface cell also says how far up the cell its floor is (3..255 = 0..1), or that it
+// has none (a wall or ceiling runs through it).
+constexpr uint8_t CELL_OPEN = 0, CELL_SOLID = 1, CELL_SURFACE_NO_FLOOR = 2, CELL_SURFACE_FLOOR = 3;
+
+// The cells the player has dug out, around the player, one bit each. Zelda's collision
+// and crosshair ignore scenery inside them; everything else collides as normal.
+struct CarvedGrid { uint32_t epoch, count; int32_t x, y, z; uint8_t bits[CARVED_SIDE * CARVED_SIDE * CARVED_SIDE / 8]; };
 constexpr uint32_t FLAG_ACTIVE = 1, FLAG_DIALOGUE = 2, FLAG_PAUSE = 4, FLAG_SCRIPTED = 8, FLAG_INSTRUMENT = 16, FLAG_AIMING = 32;
 // Control bits published by Minecraft.
 constexpr uint32_t KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_JUMP = 16, KEY_ATTACK = 32,
@@ -106,9 +111,15 @@ float avatarEye() { return LINK_IS_ADULT ? 60.0f : 38.0f; }
 float bodyRadius() { return link()->ageProperties ? link()->ageProperties->wallCheckRadius : 14.0f; }
 
 // Zelda keeps Link when a cutscene, climb, ride or similar scripted motion is running.
+// Some interiors (shops, houses, the Market) are a flat painted backdrop that only makes
+// sense from the game's own fixed camera; a free first-person view shows nothing there.
+bool paintedRoom() {
+    auto* mesh = gPlayState->roomCtx.curRoom.meshHeader;
+    return mesh && mesh->base.type == 1;
+}
 bool nativeOwnsMotion() {
     auto* p = link();
-    return Player_InCsMode(gPlayState) ||
+    return Player_InCsMode(gPlayState) || paintedRoom() ||
            (p->stateFlags1 & (PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE |
                               PLAYER_STATE1_CLIMBING_LADDER | PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_GETTING_ITEM |
                               PLAYER_STATE1_TALKING)) ||
@@ -152,29 +163,68 @@ void start() {
 
 #include "BlockColliders.h"
 
+CarvedGrid carvedGrid{};
+void readCarved() {
+    CarvedGrid next;
+    if (read(shared, CARVED, next) && next.epoch == port.epoch) carvedGrid = next;
+    else carvedGrid.count = 0;
+}
+bool carvedAt(float x, float y, float z) {
+    if (!carvedGrid.count) return false;
+    int cx = (int)std::floor(x / SCALE) - carvedGrid.x, cy = (int)std::floor(y / SCALE) - carvedGrid.y,
+        cz = (int)std::floor(z / SCALE) - carvedGrid.z;
+    if (cx < 0 || cy < 0 || cz < 0 || cx >= CARVED_SIDE || cy >= CARVED_SIDE || cz >= CARVED_SIDE) return false;
+    int index = (cy * CARVED_SIDE + cz) * CARVED_SIDE + cx;
+    return carvedGrid.bits[index >> 3] >> (index & 7) & 1;
+}
+// First scenery along a line that has not been dug away. A surface belongs to the cell
+// just behind it, so that cell decides whether it is still there.
+bool lineHit(Vec3f from, Vec3f to, Vec3f* hit, CollisionPoly** poly, s32* bg) {
+    float dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, length = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (length < 0.01f) return false;
+    dx /= length, dy /= length, dz /= length;
+    for (int i = 0; i < 6; i++) {
+        if (!BgCheck_EntityLineTest1(&gPlayState->colCtx, &from, &to, hit, poly, true, true, true, true, bg)) return false;
+        if (!carvedAt(hit->x + dx * 2, hit->y + dy * 2, hit->z + dz * 2)) return true;
+        from = { hit->x + dx * 2, hit->y + dy * 2, hit->z + dz * 2 };
+    }
+    return false;
+}
+// Highest floor at or below a point that has not been dug away.
+float floorBelow(Vec3f ray, Actor* actor, bool* skipped) {
+    for (int i = 0; i < 8; i++) {
+        CollisionPoly* floor = nullptr;
+        s32 bg = 0;
+        float h = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, actor, &ray);
+        if (h < -31000 || !carvedAt(ray.x, h - 2, ray.z)) return h;
+        *skipped = true;
+        ray.y = h - 2;
+    }
+    return -32000;
+}
+
 // Sweep the Minecraft player capsule through Zelda's collision world. Minecraft
 // resolves its own block shapes before and after, so mirrored cubes are skipped.
 Reply collide(const Request& r) {
     if (!world() || !active || r.epoch != port.epoch) return { 0, 0, 0 };
     if (!finite({ r.x, r.y, r.z, r.dx, r.dy, r.dz })) return { 0, 0, 0 };
     if (std::abs(r.dx) > 200 || std::abs(r.dy) > 200 || std::abs(r.dz) > 200) return { 0, 0, 0 };
-    // Where the player has dug into the floor, Minecraft's blocks take over from
-    // Zelda's collision: over a hole there is no Zelda floor, and underground none at all.
-    const uint32_t dug = acquire(shared + DIG_MODE);
-    if (dug == (DIG_NO_FLOOR | DIG_NO_WALLS | DIG_NO_CEILING)) return { r.dx, r.dy, r.dz };
     auto* actor = &link()->actor;
     float height = bodyHeight(), radius = bodyRadius();
     float requested;
     std::memcpy(&requested, shared + 44, 4);
     if (std::isfinite(requested) && requested >= 8 && requested <= height) height = requested;
     CubeQueryGuard cubes;
+    // Near dug-out cells the game's own wall test cannot be used: it pushes away from a
+    // whole wall, including the part that has been removed.
+    const bool dug = carvedGrid.count > 0;
     Vec3f cur{ r.x, r.y, r.z };
     int steps = std::clamp((int)std::ceil(std::max({ std::abs(r.dx), std::abs(r.dy), std::abs(r.dz) }) / 8), 1, 32);
     for (int i = 0; i < steps; i++) {
         Vec3f next{ cur.x + r.dx / steps, cur.y + r.dy / steps, cur.z + r.dz / steps }, out = next;
         CollisionPoly* wall = nullptr;
         s32 bg = 0;
-        if (!(dug & DIG_NO_WALLS)) {
+        if (!dug) {
             BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &out, &next, &cur, radius, &wall, &bg, actor,
                                      std::min(26.8f, height - 2.0f));
             // Test near the head too, so low archways cannot be walked through upright.
@@ -183,21 +233,43 @@ Reply collide(const Request& r) {
             BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &head, &newHead, &oldHead, radius, &wall, &bg, actor, 20.0f);
             out.x = head.x;
             out.z = head.z;
+        } else {
+            // Feel outwards for walls at knee, waist and head height and step back from
+            // any that are still there. Above step height, so low ledges are climbed.
+            const float reach = std::min(radius, 12.0f);
+            for (float level : { 27.0f, height * .5f, std::max(28.0f, height - 6) }) {
+                Vec3f hit{};
+                // Do not pass through a wall in one step.
+                Vec3f from{ cur.x, cur.y + level, cur.z }, to{ out.x, out.y + level, out.z };
+                if (lineHit(from, to, &hit, &wall, &bg)) {
+                    out.x = cur.x;
+                    out.z = cur.z;
+                }
+                for (int direction = 0; direction < 8; direction++) {
+                    float ax = std::cos(direction * 0.7853982f), az = std::sin(direction * 0.7853982f);
+                    Vec3f centre{ out.x, out.y + level, out.z }, edge{ out.x + ax * reach, out.y + level, out.z + az * reach };
+                    if (!lineHit(centre, edge, &hit, &wall, &bg)) continue;
+                    float gap = std::sqrt((hit.x - centre.x) * (hit.x - centre.x) + (hit.z - centre.z) * (hit.z - centre.z));
+                    out.x -= ax * (reach - gap);
+                    out.z -= az * (reach - gap);
+                }
+            }
         }
         float floorY = -32000;
+        bool skipped = false;
         for (auto offset : { Vec3f{ 0, 0, 0 }, Vec3f{ 9, 0, 9 }, Vec3f{ -9, 0, 9 }, Vec3f{ 9, 0, -9 }, Vec3f{ -9, 0, -9 } }) {
             Vec3f ray{ out.x + offset.x, std::max(cur.y, out.y) + 24, out.z + offset.z };
-            CollisionPoly* floor = nullptr;
-            float h = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, actor, &ray);
+            float h = floorBelow(ray, actor, &skipped);
             if (h <= cur.y + 24.01f) floorY = std::max(floorY, h);
         }
-        if (dug & DIG_NO_FLOOR) floorY = -32000;
         if (out.y < floorY && r.dy <= 0) out.y = floorY;
         float ceilingY = out.y;
         CollisionPoly* ceiling = nullptr;
-        if (!(dug & DIG_NO_CEILING) && BgCheck_EntityCheckCeiling(&gPlayState->colCtx, &ceilingY, &out, height, &ceiling, &bg, actor))
+        if (BgCheck_EntityCheckCeiling(&gPlayState->colCtx, &ceilingY, &out, height, &ceiling, &bg, actor) &&
+            !carvedAt(out.x, ceilingY + height + 2, out.z))
             out.y = std::min(out.y, ceilingY);
-        if (floorY < -31000 && out.y < cur.y - 20 && !(dug & DIG_NO_FLOOR)) return { 0, 0, 0 };
+        // No floor at all means the edge of the world, unless a dug floor is why.
+        if (floorY < -31000 && out.y < cur.y - 20 && !skipped) return { 0, 0, 0 };
         cur = out;
     }
     return { cur.x - r.x, cur.y - r.y, cur.z - r.z };
@@ -218,8 +290,7 @@ void publishDigHit() {
             s32 bg = 0;
             CubeQueryGuard cubes;
             // Only the scene itself can be dug, not doors, platforms and other moving pieces.
-            if (BgCheck_EntityLineTest1(&gPlayState->colCtx, &eye, &end, &hit, &poly, true, true, true, true, &bg) && poly &&
-                bg == BGCHECK_SCENE) {
+            if (lineHit(eye, end, &hit, &poly, &bg) && poly && bg == BGCHECK_SCENE) {
                 out = { port.epoch, 1, hit.x, hit.y, hit.z, poly->normal.x / 32767.0f, poly->normal.y / 32767.0f,
                         poly->normal.z / 32767.0f, func_80041F10(&gPlayState->colCtx, poly, bg) };
             }
@@ -229,25 +300,36 @@ void publishDigHit() {
 }
 
 // Is a block cell open air, solid, or crossed by scenery? Minecraft lines dug space
-// with blocks only where the answer is solid. Scenery is a hollow shell, so "solid"
-// means no surface runs through the cell and there is no floor anywhere beneath it.
-CellClass classify(int cx, int cy, int cz) {
-    const float half = SCALE / 2, reach = half - 1;
-    Vec3f centre{ cx * SCALE + half, cy * SCALE + half, cz * SCALE + half };
-    static const Vec3f axes[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
-    for (auto& axis : axes) {
-        Vec3f a{ centre.x - axis.x * reach, centre.y - axis.y * reach, centre.z - axis.z * reach };
-        Vec3f b{ centre.x + axis.x * reach, centre.y + axis.y * reach, centre.z + axis.z * reach };
-        Vec3f hit{};
-        CollisionPoly* poly = nullptr;
-        s32 bg = 0;
-        // Surfaces are one-sided, so look along each axis in both directions.
-        if (BgCheck_EntityLineTest1(&gPlayState->colCtx, &a, &b, &hit, &poly, true, true, true, true, &bg) ||
-            BgCheck_EntityLineTest1(&gPlayState->colCtx, &b, &a, &hit, &poly, true, true, true, true, &bg))
-            return CELL_SURFACE;
-    }
+// with blocks only where the answer is solid, and treats cells with scenery through
+// them as solid until they are dug too. Scenery is a hollow shell, so "solid" means no
+// surface runs through the cell and there is no floor anywhere beneath it.
+uint8_t classify(int cx, int cy, int cz) {
+    const float lo = 2, hi = SCALE - 2;
+    Vec3f base{ cx * SCALE, cy * SCALE, cz * SCALE };
+    bool crossed = false;
+    // A 3x3 bundle of lines along each axis, so a surface that only clips a corner counts.
+    for (int axis = 0; axis < 3 && !crossed; axis++)
+        for (int i = 0; i < 9 && !crossed; i++) {
+            float u = lo + (i % 3) * (hi - lo) / 2, v = lo + (i / 3) * (hi - lo) / 2;
+            Vec3f a = base, b = base;
+            if (axis == 0) a.x += lo, b.x += hi, a.y += u, b.y += u, a.z += v, b.z += v;
+            if (axis == 1) a.y += lo, b.y += hi, a.x += u, b.x += u, a.z += v, b.z += v;
+            if (axis == 2) a.z += lo, b.z += hi, a.x += u, b.x += u, a.y += v, b.y += v;
+            Vec3f hit{};
+            CollisionPoly* poly = nullptr;
+            s32 bg = 0;
+            // Surfaces are one-sided, so look along each line in both directions.
+            crossed = BgCheck_EntityLineTest1(&gPlayState->colCtx, &a, &b, &hit, &poly, true, true, true, true, &bg) ||
+                      BgCheck_EntityLineTest1(&gPlayState->colCtx, &b, &a, &hit, &poly, true, true, true, true, &bg);
+        }
+    Vec3f centre{ base.x + SCALE / 2, base.y + SCALE / 2, base.z + SCALE / 2 }, top{ centre.x, base.y + SCALE - 1, centre.z };
     CollisionPoly* floor = nullptr;
     s32 bg = 0;
+    if (crossed) {
+        float h = BgCheck_EntityRaycastFloor3(&gPlayState->colCtx, &floor, &bg, &top);
+        if (h <= base.y || h > base.y + SCALE) return CELL_SURFACE_NO_FLOOR;
+        return (uint8_t)(CELL_SURFACE_FLOOR + std::clamp((h - base.y) / SCALE, 0.0f, 1.0f) * 252);
+    }
     return BgCheck_EntityRaycastFloor3(&gPlayState->colCtx, &floor, &bg, &centre) > -31000 ? CELL_OPEN : CELL_SOLID;
 }
 void serviceClassify() {
@@ -296,6 +378,7 @@ void serviceCamera() {
     release(shared + CAMERA_REPLY, serial);
 }
 void service() {
+    readCarved();
     serviceCamera();
     serviceClassify();
     auto serial = acquire(shared + REQUEST);

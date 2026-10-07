@@ -25,20 +25,23 @@ import net.minecraft.world.phys.Vec3;
  * inside carved cells and Zelda's collision is switched off around them, so the space
  * behaves like dug-out Minecraft. Cracks are drawn on the Zelda surface while mining.
  *
- * What lies behind the surface is generated lazily. When a cell is carved, Zelda is
- * asked about each neighbour: one that is solid (no scenery through it, no floor under
- * it) is filled with soil, then stone further in, so dug space is always lined with
- * blocks and never opens onto the void. Breaking one of those blocks carves its cell
- * in turn, taking any Zelda surface lying on it along with it.
+ * What lies behind the surface is worked out lazily. When a cell is carved, Zelda is
+ * asked about each neighbour. One that is solid (no scenery through it, no floor under
+ * it) is filled with soil, then stone further in. One that has scenery running through
+ * it stays as Zelda draws it, but counts as a solid block from inside the dig until it
+ * is mined too: Zelda's scenery is a hollow shell, and the space behind it is the void.
+ * One that is open air is left alone. So dug space is always closed in, and every way
+ * out of it leads either to open ground or to something that can be mined.
  */
 public final class Digging {
- // Per cell: how many cells in from the original surface, the surface material, and
- // whether it has been dug out (carved) or still holds the block generated for it.
- private static final int DEPTH=0xff,MATERIAL_SHIFT=8,CARVED=1<<16;
+ // Per cell: how many cells in from the original surface, the surface material, what
+ // the cell is, and for a cell with a floor through it how high that floor sits.
+ private static final int DEPTH=0xff,MATERIAL_SHIFT=8,KIND_SHIFT=16,KIND=3<<KIND_SHIFT,HEIGHT_SHIFT=18;
+ private static final int FILLED=0,CARVED=1<<KIND_SHIFT,OPEN=2<<KIND_SHIFT,SURFACE=3<<KIND_SHIFT;
  private static final Map<Long,Integer> cells=new ConcurrentHashMap<>();
  private static final int MAP=64,LAYERS=24,DEPTH_STONE=4,DEPTH_BEDROCK=24;
  private static final int HIT=4608,CLASSIFY_REQUEST=4672,CLASSIFY_REPLY=4928,CLASSIFY_MAX=16;
- private static final int NO_FLOOR=1,NO_WALLS=2,NO_CEILING=4,SOLID=1;
+ private static final int CARVED_GRID=5120,GRID=16;
  private static Path file;private static boolean loaded,dirty;private static int ticks;
  private static int mapX=Integer.MIN_VALUE,mapY,mapZ;private static volatile boolean mapDirty=true;
  // The Zelda surface cell being mined right now, for the crack overlay.
@@ -48,7 +51,8 @@ public final class Digging {
  private static final ConcurrentLinkedQueue<Pending> queue=new ConcurrentLinkedQueue<>();
  private static List<Pending> asked=List.of();private static int serial,askedTicks;
 
- private static boolean carved(int x,int y,int z){Integer v=cells.get(BlockPos.asLong(x,y,z));return v!=null&&(v&CARVED)!=0;}
+ private static int kind(Integer cell){return cell==null?-1:cell&KIND;}
+ private static boolean carved(int x,int y,int z){return kind(cells.get(BlockPos.asLong(x,y,z)))==CARVED;}
  public static boolean carved(BlockPos p){return carved(p.getX(),p.getY(),p.getZ());}
 
  // --- compositor data -------------------------------------------------------------
@@ -71,7 +75,7 @@ public final class Digging {
   mapDirty=false;
   int[] bits=new int[MAP*MAP];
   for(var e:cells.entrySet()){
-   if((e.getValue()&CARVED)==0)continue;
+   if(kind(e.getValue())!=CARVED)continue;
    long key=e.getKey();int x=BlockPos.getX(key)-mapX,y=BlockPos.getY(key)-mapY,z=BlockPos.getZ(key)-mapZ;
    if(x>=0&&x<MAP&&z>=0&&z<MAP&&y>=0&&y<LAYERS)bits[z*MAP+x]|=1<<y;
   }
@@ -84,29 +88,69 @@ public final class Digging {
  public static void tick(Minecraft mc,Shared shm,int epoch){
   var server=mc.getSingleplayerServer();if(server==null||mc.player==null)return;
   load(server.getWorldPath(LevelResource.ROOT));
-  shm.set(8,collisionMode(mc));
+  publishCarved(mc,shm,epoch);
   mine(mc,shm,epoch);
   classify(mc,shm,epoch);
   if(dirty&&++ticks%100==0)save();
  }
 
- /** Which of Zelda's collision to ignore: dug-out space is bounded by Minecraft blocks instead. */
- private static int collisionMode(Minecraft mc){
-  if(cells.isEmpty())return 0;
-  var player=mc.player;var box=player.getBoundingBox();
+ /** Zelda ignores its own scenery inside dug cells; it is told which those are around the player. */
+ private static int gridX=Integer.MIN_VALUE,gridY,gridZ;private static boolean gridDirty=true;private static int gridEpoch;
+ private static void publishCarved(Minecraft mc,Shared shm,int epoch){
+  var at=mc.player.blockPosition();
+  if(gridX==Integer.MIN_VALUE||Math.abs(at.getX()-gridX-GRID/2)>3||Math.abs(at.getY()-gridY-GRID/2)>3||Math.abs(at.getZ()-gridZ-GRID/2)>3){
+   gridX=at.getX()-GRID/2;gridY=at.getY()-GRID/2;gridZ=at.getZ()-GRID/2;gridDirty=true;
+  }
+  if(!gridDirty&&gridEpoch==epoch)return;
+  gridDirty=false;gridEpoch=epoch;
+  byte[] bits=new byte[GRID*GRID*GRID/8];int count=0;
+  for(int y=0;y<GRID;y++)for(int z=0;z<GRID;z++)for(int x=0;x<GRID;x++)if(carved(gridX+x,gridY+y,gridZ+z)){
+   int index=(y*GRID+z)*GRID+x;bits[index>>3]|=1<<(index&7);count++;
+  }
+  var payload=Passthrough.buffer(20+bits.length);
+  payload.putInt(epoch).putInt(count).putInt(gridX-(int)Passthrough.origin()).putInt(gridY-1024).putInt(gridZ).put(bits);
+  shm.publish(CARVED_GRID,payload);
+ }
+
+ /**
+  * Extra solids for the player while inside a dig. The cells around dug space that are
+  * neither dug, nor open air, nor real blocks are Zelda scenery seen from its hollow
+  * side, or not yet identified; from in here they are solid, so nothing leads to the void.
+  * A cell with a floor through it is solid up to that floor, so it can be stepped onto.
+  */
+ public static List<net.minecraft.world.phys.shapes.VoxelShape> solids(net.minecraft.world.entity.player.Player player){
+  if(cells.isEmpty())return List.of();
+  var box=player.getBoundingBox();
   int x=(int)Math.floor(player.getX()),z=(int)Math.floor(player.getZ());
-  int mode=0;
-  // Standing in or over a dug cell: Zelda's floor there is gone.
-  if(carved(x,(int)Math.floor(box.minY-.05),z)||carved(x,(int)Math.floor(box.minY+.01),z))mode|=NO_FLOOR;
-  if(carved(x,(int)Math.floor(box.maxY+.2),z))mode|=NO_CEILING;
-  // Zelda keeps the player a body-width from its walls, so its walls must give way
-  // before the player reaches a hole in one.
-  var reach=box.inflate(.5,0,.5);
-  walls:for(int cx=(int)Math.floor(reach.minX);cx<=(int)Math.floor(reach.maxX);cx++)
-   for(int cz=(int)Math.floor(reach.minZ);cz<=(int)Math.floor(reach.maxZ);cz++)
-    for(int cy=(int)Math.floor(box.minY+.01);cy<=(int)Math.floor(box.maxY-.01);cy++)
-     if(carved(cx,cy,cz)){mode|=NO_WALLS;break walls;}
-  return mode;
+  if(!carved(x,(int)Math.floor(box.minY+.05),z)&&!carved(x,(int)Math.floor(box.getCenter().y),z))return List.of();
+  var shapes=new ArrayList<net.minecraft.world.phys.shapes.VoxelShape>();
+  for(int cx=x-1;cx<=x+1;cx++)for(int cz=z-1;cz<=z+1;cz++)for(int cy=(int)Math.floor(box.minY)-1;cy<=(int)Math.floor(box.maxY)+1;cy++){
+   Integer cell=cells.get(BlockPos.asLong(cx,cy,cz));
+   int kind=kind(cell);
+   if(kind==CARVED||kind==OPEN||kind==FILLED)continue; // real blocks collide by themselves
+   if(kind==-1&&!besideCarved(cx,cy,cz))continue;
+   double top=kind==SURFACE&&(cell>>HEIGHT_SHIFT&0xff)>0?(cell>>HEIGHT_SHIFT&0xff)/255.0:1;
+   shapes.add(net.minecraft.world.phys.shapes.Shapes.create(new net.minecraft.world.phys.AABB(cx,cy,cz,cx+1,cy+top,cz+1)));
+  }
+  return shapes;
+ }
+ private static boolean besideCarved(int x,int y,int z){
+  return carved(x+1,y,z)||carved(x-1,y,z)||carved(x,y+1,z)||carved(x,y-1,z)||carved(x,y,z+1)||carved(x,y,z-1);
+ }
+ /** From inside a dig: the first solid-but-unseen cell along the line of sight, to mine it like a block. */
+ private static BlockPos behindScenery(Minecraft mc){
+  var eye=mc.player.getEyePosition();var look=mc.player.getLookAngle();
+  if(!carved(BlockPos.containing(eye))&&!carved(mc.player.blockPosition()))return null;
+  BlockPos last=null;
+  for(double t=0;t<=4.5;t+=.1){
+   var pos=BlockPos.containing(eye.add(look.scale(t)));
+   if(pos.equals(last))continue;
+   last=pos;
+   int kind=kind(cells.get(pos.asLong()));
+   if(kind==CARVED)continue;
+   return kind==SURFACE||(kind==-1&&besideCarved(pos.getX(),pos.getY(),pos.getZ()))?pos:null;
+  }
+  return null;
  }
 
  /** Holding attack on Zelda scenery mines it like a block of that material. */
@@ -125,6 +169,12 @@ public final class Digging {
    target=BlockPos.containing(point.add(point.subtract(eye).normalize().scale(.05)));
    material=hit.getInt(32);surface=surfaceBlock(material);
    if(surface==null||carved(target)||point.distanceTo(eye)>(mc.player.getAbilities().instabuild?5:4.5))target=null;
+  }
+  // Nothing in view to mine from this side: scenery seen from behind, inside a dig.
+  if(target==null&&Passthrough.interactive()&&NativeBlocks.inDimension()&&mc.gui.screen()==null&&mc.options.keyAttack.isDown()
+     &&!NativeButtons.empty(mc)&&!ZeldaItems.holding(mc)&&(mc.hitResult==null||mc.hitResult.getType()==HitResult.Type.MISS)){
+   target=behindScenery(mc);
+   if(target!=null){Integer cell=cells.get(target.asLong());material=cell==null?0:(cell>>MATERIAL_SHIFT)&0xff;surface=Blocks.DIRT;}
   }
   if(target==null){mining=null;progress=0;return;}
   if(!target.equals(mining)){mining=target;progress=0;}
@@ -151,9 +201,9 @@ public final class Digging {
  /** Mark a cell dug out and ask Zelda about its neighbours. */
  private static void carve(BlockPos pos,int depth,int material){
   Integer old=cells.get(pos.asLong());
-  if(old!=null){depth=old&DEPTH;material=(old>>MATERIAL_SHIFT)&0xff;}
+  if(old!=null&&(old&DEPTH)!=0){depth=old&DEPTH;material=(old>>MATERIAL_SHIFT)&0xff;}
   cells.put(pos.asLong(),depth|material<<MATERIAL_SHIFT|CARVED);
-  mapDirty=true;dirty=true;
+  mapDirty=true;gridDirty=true;dirty=true;
   for(var direction:Direction.values()){
    var next=pos.relative(direction);
    if(!cells.containsKey(next.asLong()))queue.add(new Pending(next.immutable(),Math.min(depth+1,DEPTH),material));
@@ -170,7 +220,14 @@ public final class Digging {
    }
    var answered=asked;asked=List.of();
    var fill=new ArrayList<Pending>();
-   for(int i=0;i<answered.size();i++)if(shm.mem.get(CLASSIFY_REPLY+4+i)==SOLID)fill.add(answered.get(i));
+   for(int i=0;i<answered.size();i++){
+    var p=answered.get(i);int answer=Byte.toUnsignedInt(shm.mem.get(CLASSIFY_REPLY+4+i)),base=p.depth()|p.material()<<MATERIAL_SHIFT;
+    if(answer==1)fill.add(p); // solid: becomes a real block below
+    else if(answer==0)cells.putIfAbsent(p.pos().asLong(),base|OPEN);
+    // Scenery runs through it; 3..255 is how far up the cell its floor is.
+    else cells.putIfAbsent(p.pos().asLong(),base|SURFACE|(answer<3?0:Math.max(1,answer-3))<<HEIGHT_SHIFT);
+    dirty=true;
+   }
    var server=mc.getSingleplayerServer();
    if(!fill.isEmpty())server.execute(()->{
     var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
@@ -204,7 +261,7 @@ public final class Digging {
  public static void changed(ServerLevel level,BlockPos pos,BlockState before,BlockState after){
   if(!loaded||!level.dimension().equals(NativeBlocks.DIMENSION)||!after.isAir()||before.isAir()||before.is(Blocks.BARRIER))return;
   Integer cell=cells.get(pos.asLong());
-  if(cell==null||(cell&CARVED)!=0)return;
+  if(kind(cell)!=FILLED)return;
   carve(pos.immutable(),cell&DEPTH,(cell>>MATERIAL_SHIFT)&0xff);
  }
  /** Zelda surface material to the block it mines as; null where digging is not allowed. */
@@ -229,7 +286,7 @@ public final class Digging {
   cells.clear();queue.clear();asked=List.of();file=path;loaded=true;mapDirty=true;dirty=false;
   if(!Files.isRegularFile(path))return;
   try(var in=new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))){
-   if(in.readInt()!=2)return; // an earlier layout: those digs keep their blocks but lose their openings
+   if(in.readInt()!=3)return; // an earlier layout: those digs keep their blocks but lose their openings
    for(int n=in.readInt();n>0;n--)cells.put(in.readLong(),in.readInt());
   }catch(IOException e){System.err.println("Could not read "+path+": "+e);}
  }
@@ -238,7 +295,7 @@ public final class Digging {
   try{
    var temp=file.resolveSibling(file.getFileName()+".tmp");
    try(var out=new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(temp)))){
-    out.writeInt(2);
+    out.writeInt(3);
     var entries=new ArrayList<>(cells.entrySet());out.writeInt(entries.size());
     for(var e:entries){out.writeLong(e.getKey());out.writeInt(e.getValue());}
    }

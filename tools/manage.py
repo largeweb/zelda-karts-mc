@@ -137,6 +137,8 @@ def install(c):
     settings = {'oot_runtime': c['runtime']}
     if c.get('arms'):
         settings['arms'] = str(c['arms'])
+    if c.get('start'):
+        settings['start'] = str(c['start'])
     if shutil.which('hyprctl'):
         settings['arrange'] = [sys.executable, str(ROOT / 'tools/arrange.py'), '--wait']
     (config_dir / 'hyrule.json').write_text(json.dumps(settings, indent=2) + '\n')
