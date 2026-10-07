@@ -23,7 +23,8 @@
     "CommandsMixin",
     "BackupMixin",
     "PipelineMixin",
-    "ExplosionMixin"
+    "ExplosionMixin",
+    "BlockChangeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -12,9 +12,12 @@ import net.minecraft.world.phys.*;
 public final class NativeBlocks {
  public static final ResourceKey<Level> DIMENSION=ResourceKey.create(Registries.DIMENSION,Identifier.parse("composite:zelda"));
  static BlockPos target;static int placeCooldown;
+ /** Zelda floor height (absolute block Y) under the aimed-at spot. */
+ static float targetHeight;
  public static boolean inDimension(){var mc=Minecraft.getInstance();return mc.level!=null&&mc.level.dimension().equals(DIMENSION);}
  public static void target(java.nio.ByteBuffer p){
   target=p.getInt(32)!=0?BlockPos.containing(p.getFloat(36)/40.0+Passthrough.origin(),1024+Math.ceil(p.getFloat(40)/40.0-0.001),p.getFloat(44)/40.0):null;
+  targetHeight=1024+p.getFloat(40)/40f;
   if(placeCooldown>0)placeCooldown--;
  }
  // Only the first block on Zelda ground needs a synthetic surface; subsequent use is vanilla.

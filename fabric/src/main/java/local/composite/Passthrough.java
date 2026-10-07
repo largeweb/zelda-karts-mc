@@ -37,7 +37,8 @@ public final class Passthrough {
  /** Link is aiming an item in first person and Zelda is drawing his arms. */
  public static boolean aiming(){return active()&&aiming;}
  /** Tells Zelda the far plane Minecraft renders with, so exported depth matches Minecraft's. */
- public static void depthFar(float far){if(shared!=null)shared.f(60,far);}
+ public static void depthFar(float far){WorldFrame.far=far;if(shared!=null)shared.f(60,far);}
+ public static void dig(Minecraft mc){Digging.start(mc,shared);}
  public static boolean interactive(){return active()&&!locked;}
  public static boolean active(){return ENABLED&&attached&&System.nanoTime()-heartbeat<1_000_000_000L;}
  static ByteBuffer buffer(int n){return ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN);}
@@ -89,7 +90,7 @@ public final class Passthrough {
   }
   Vec3 feet=player.position().subtract(origin(),BASE,0).scale(SCALE),eye=feet.add(0,player.getEyeHeight()*SCALE,0);
   FloorSupport.tick(mc,shm,epoch);
-  NativeBlocks.target(p);NativeCombat.tick(shm,epoch);ZeldaFire.tick(mc,shm,epoch);
+  NativeBlocks.target(p);NativeCombat.tick(shm,epoch);ZeldaFire.tick(mc,shm,epoch);Digging.tick(mc,shm,epoch);
   wasGrounded=player.onGround();
   // Native Minecraft renders/mines every block; only nearby full cubes are mirrored
   // into Zelda for native arrows/actors. Partial shapes use vanilla player collision.

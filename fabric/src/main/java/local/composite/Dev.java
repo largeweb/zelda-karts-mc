@@ -71,6 +71,9 @@ public final class Dev {
    s.addProperty("grounded",mc.player.onGround());s.addProperty("health",mc.player.getHealth());
    s.addProperty("item",mc.player.getMainHandItem().toString());s.addProperty("zeldaItem",ZeldaItems.held(mc));
    s.addProperty("rupees",mc.player.experienceLevel);
+   if(mc.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit){
+    s.addProperty("hit",hit.getType()+" "+hit.getBlockPos().toShortString()+" "+mc.level.getBlockState(hit.getBlockPos()).getBlock());
+   }else s.addProperty("hit",String.valueOf(mc.hitResult==null?null:mc.hitResult.getType()));
   }
   return s;
  }

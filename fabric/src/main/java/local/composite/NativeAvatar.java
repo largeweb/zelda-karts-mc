@@ -21,7 +21,7 @@ public final class NativeAvatar {
   float h=height,e=eye;
   if(pose==Pose.CROUCHING){h*=.8f;e*=.8f;}
   if(pose==Pose.SWIMMING||pose==Pose.FALL_FLYING||pose==Pose.SPIN_ATTACK){h=Math.min(h,24);e=h*.8f;}
-  return EntityDimensions.scalable(radius*2/40,h/40).withEyeHeight(e/40);
+  return EntityDimensions.scalable(Math.min(.6f,radius*2/40),h/40).withEyeHeight(e/40);
  }
  public static void tick(Minecraft mc,Shared shm,int currentEpoch,java.nio.ByteBuffer story){
   boolean newPlayer=attachedPlayer!=mc.player||epoch!=currentEpoch;attachedPlayer=mc.player;epoch=currentEpoch;owner=mc.player.getUUID();

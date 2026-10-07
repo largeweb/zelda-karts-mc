@@ -41,6 +41,10 @@ using namespace composite;
 // Offsets beyond Protocol.h's legacy layout; mirrored by the Fabric mod.
 constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,
               COMBAT = 1408, FLOOR = 1536, ENEMIES = 1888;
+// Header fields written by Minecraft for dug floors: how to treat the player, and how far
+// above the player to start sampling Zelda floors when the player is below the surface.
+constexpr int DIG_MODE = 8, DIG_MATERIAL = 12, DIG_LIFT = 16;
+constexpr uint32_t DIG_OVER_HOLE = 1, DIG_UNDERGROUND = 2;
 constexpr uint32_t FLAG_ACTIVE = 1, FLAG_DIALOGUE = 2, FLAG_PAUSE = 4, FLAG_SCRIPTED = 8, FLAG_INSTRUMENT = 16, FLAG_AIMING = 32;
 // Control bits published by Minecraft.
 constexpr uint32_t KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_JUMP = 16, KEY_ATTACK = 32,
@@ -142,6 +146,10 @@ Reply collide(const Request& r) {
     if (!world() || !active || r.epoch != port.epoch) return { 0, 0, 0 };
     if (!finite({ r.x, r.y, r.z, r.dx, r.dy, r.dz })) return { 0, 0, 0 };
     if (std::abs(r.dx) > 200 || std::abs(r.dy) > 200 || std::abs(r.dz) > 200) return { 0, 0, 0 };
+    // Where the player has dug into the floor, Minecraft's blocks take over from
+    // Zelda's collision: over a hole there is no Zelda floor, and underground none at all.
+    const uint32_t dug = acquire(shared + DIG_MODE);
+    if (dug == DIG_UNDERGROUND) return { r.dx, r.dy, r.dz };
     auto* actor = &link()->actor;
     float height = bodyHeight(), radius = bodyRadius();
     float requested;
@@ -169,12 +177,13 @@ Reply collide(const Request& r) {
             float h = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, actor, &ray);
             if (h <= cur.y + 24.01f) floorY = std::max(floorY, h);
         }
+        if (dug == DIG_OVER_HOLE) floorY = -32000;
         if (out.y < floorY && r.dy <= 0) out.y = floorY;
         float ceilingY = out.y;
         CollisionPoly* ceiling = nullptr;
         if (BgCheck_EntityCheckCeiling(&gPlayState->colCtx, &ceilingY, &out, height, &ceiling, &bg, actor))
             out.y = std::min(out.y, ceilingY);
-        if (floorY < -31000 && out.y < cur.y - 20) return { 0, 0, 0 };
+        if (floorY < -31000 && out.y < cur.y - 20 && dug != DIG_OVER_HOLE) return { 0, 0, 0 };
         cur = out;
     }
     return { cur.x - r.x, cur.y - r.y, cur.z - r.z };
@@ -236,6 +245,7 @@ void target() {
     CollisionPoly* floor = nullptr;
     float y = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, &link()->actor, &ray);
     if (y < -31000 || std::abs(y - hit.y) > 24) return;
+    release(shared + DIG_MATERIAL, func_80041F10(&gPlayState->colCtx, floor, bg));
     port.target = 1;
     port.tx = x;
     port.ty = y;
@@ -268,8 +278,11 @@ void publishFloor() {
     f.epoch = port.epoch;
     f.x = (int)std::floor(mc.x / 40) - 4;
     f.z = (int)std::floor(mc.z / 40) - 4;
+    float lift;
+    std::memcpy(&lift, shared + DIG_LIFT, 4);
+    if (!std::isfinite(lift) || lift < 0 || lift > 2000) lift = 0;
     for (int i = 0; i < 81; i++) {
-        Vec3f ray{ (f.x + i % 9) * 40.0f + 20, mc.y + 80, (f.z + i / 9) * 40.0f + 20 };
+        Vec3f ray{ (f.x + i % 9) * 40.0f + 20, mc.y + 80 + lift, (f.z + i / 9) * 40.0f + 20 };
         CollisionPoly* poly = nullptr;
         s32 bg = 0;
         f.y[i] = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &poly, &bg, &link()->actor, &ray);

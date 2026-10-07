@@ -72,9 +72,24 @@ Minecraft hearts are the only health. Zelda's hearts stay full; every hit Link
 takes is passed to Minecraft as damage. The experience number shows rupees and
 the experience bar shows magic. Creative mode takes no damage.
 
+## Minecraft and Zelda acting on each other
+
+- Minecraft swords, axes, bows and crossbows hurt Zelda enemies.
+- Minecraft explosions (TNT and the like) hurt Zelda actors as a bomb would.
+- Fire arrows, Din's Fire and Zelda bomb blasts ignite Minecraft TNT.
+- Blocks are hidden behind Zelda's walls and ground; Link and Zelda actors hide blocks behind them.
+
+## Digging
+
+Hit bare Zelda ground while holding any Minecraft item and that spot becomes a
+block: grass, sand, stone or planks depending on the floor. Mine it and keep
+going: dirt for a few blocks, then stone, bedrock 24 down. Holes are always lined
+with blocks. Only floors can be dug, not walls, water or lava. What has been dug
+is saved with the Minecraft world in `hyrule-digging.dat`.
+
 ## Known gaps
 
-- Minecraft blocks show through Zelda walls (no shared depth yet).
+- Zelda enemies and items still treat a dug floor as solid.
 - The session always starts as adult Link in Kokiri Forest on a debug save with
   everything unlocked. A Minecraft world is not yet tied to its own Zelda save.
 - Shields, tunics and boots are not items yet; bottles and trade items neither.

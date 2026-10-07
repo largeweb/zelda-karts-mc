@@ -13,7 +13,7 @@ public final class FloorSupport {
   int serial=shared.get(1536);if(serial==lastSerial||mc.getSingleplayerServer()==null||!NativeBlocks.inDimension())return;
   var b=shared.snapshot(1536,336);if(b==null||b.getInt(0)!=epoch)return;lastSerial=serial;
   int x=b.getInt(4),z=b.getInt(8);double origin=Passthrough.origin();List<BlockPos> support=new ArrayList<>();
-  for(int i=0;i<81;i++){float y=b.getFloat(12+i*4);if(Float.isFinite(y)&&y>-30000&&y<30000)support.add(new BlockPos((int)origin+x+i%9,1024+(int)Math.ceil(y/40.0-.001)-1,z+i/9));}
+  for(int i=0;i<81;i++){float y=b.getFloat(12+i*4);if(Float.isFinite(y)&&y>-30000&&y<30000&&!Digging.revealed((int)origin+x+i%9,z+i/9))support.add(new BlockPos((int)origin+x+i%9,1024+(int)Math.ceil(y/40.0-.001)-1,z+i/9));}
   var server=mc.getSingleplayerServer();server.execute(()->{
    var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
    for(var pos:support){
