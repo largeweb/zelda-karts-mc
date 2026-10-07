@@ -1,0 +1,175 @@
+diff --git i/soh/soh/OTRGlobals.cpp w/soh/soh/OTRGlobals.cpp
+index 1b4f62c47..803862007 100644
+--- i/soh/soh/OTRGlobals.cpp
++++ w/soh/soh/OTRGlobals.cpp
+@@ -1762,6 +1762,7 @@ extern "C" void Graph_StartFrame() {
+ }
+ 
+ // Interpolated frames of a tick are evenly spaced numerators time+step, time+2*step, ... over denom.
++void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements);
+ void RunCommands(Gfx* Commands, int time, int step, int denom, int count) {
+     auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(OTRGlobals::Instance->context->GetWindow());
+ 
+@@ -1783,6 +1784,7 @@ void RunCommands(Gfx* Commands, int time, int step, int denom, int count) {
+         std::unordered_map<Mtx*, MtxF> mtx_replacements =
+             (time == denom) ? std::unordered_map<Mtx*, MtxF>() : FrameInterpolation_Interpolate((float)time / denom);
+         intp->mInterpolationT = (float)time / denom;
++        CompositeLateCamera(mtx_replacements);
+         wnd->DrawAndRunGraphicsCommands(Commands, mtx_replacements);
+         intp->mInterpolationIndex++;
+     }
+diff --git i/soh/src/code/code_800EC960.c w/soh/src/code/code_800EC960.c
+index a118f3388..b28acc714 100644
+--- i/soh/src/code/code_800EC960.c
++++ w/soh/src/code/code_800EC960.c
+@@ -1472,6 +1472,7 @@ void AudioOcarina_SetCustomButtonMapping(bool customControls) {
+         (sOcarinaD5BtnMap | sOcarinaB4BtnMap | sOcarinaA4BtnMap | sOcarinaF4BtnMap | sOcarinaD4BtnMap);
+ }
+ 
++extern int CompositeOcarinaInput(u16* pad);
+ void AudioOcarina_ReadControllerInput(void) {
+     Input inputs[4];
+     Input* input = &inputs[0];
+@@ -1483,6 +1484,14 @@ void AudioOcarina_ReadControllerInput(void) {
+     sOcarinaInputStickAdj.x = input->rel.stick_x;
+     sOcarinaInputStickAdj.y = input->rel.stick_y;
+ 
++    // Minecraft owns the controls in a composite session, including this
++    // separate audio input poll. Native input is kept otherwise.
++    u16 compositePad;
++    if (CompositeOcarinaInput(&compositePad)) {
++        sOcarinaInputButtonCur = compositePad;
++        sOcarinaInputStickAdj.x = sOcarinaInputStickAdj.y = 0;
++    }
++
+     // SoH
+     s8 rstick_x = input->cur.right_stick_x;
+     s8 rstick_y = input->cur.right_stick_y;
+diff --git i/soh/src/code/z_actor.c w/soh/src/code/z_actor.c
+index 77c5abce3..134d8f438 100644
+--- i/soh/src/code/z_actor.c
++++ w/soh/src/code/z_actor.c
+@@ -2752,10 +2752,18 @@ void Actor_FaultPrint(Actor* actor, char* command) {
+     FaultDrawer_Printf("ACTOR NAME %08x:%s", actor, name);
+ }
+ 
++extern int CompositeHidePlayer(void);
++extern void CompositeArmsOffset(Vec3f* offset);
+ void Actor_Draw(PlayState* play, Actor* actor) {
+     FaultClient faultClient;
+     Lights* lights;
+ 
++    // In Minecraft's first-person view Link is not shown, but his draw still has to run:
++    // it positions his hands, sword tip and held projectiles. Its display lists are discarded.
++    s32 compositeHidden = actor->id == ACTOR_PLAYER && CompositeHidePlayer();
++    Gfx* compositeOpa;
++    Gfx* compositeXlu;
++
+     Fault_AddClient(&faultClient, Actor_FaultPrint, actor, "Actor_draw");
+ 
+     FrameInterpolation_RecordOpenChild(actor, 0);
+@@ -2774,8 +2782,13 @@ void Actor_Draw(PlayState* play, Actor* actor) {
+             actor->world.pos.y + (f32)((actor->shape.yOffset * actor->scale.y) + play->mainCamera.skyboxOffset.y),
+             actor->world.pos.z + play->mainCamera.skyboxOffset.z, &actor->shape.rot);
+     } else {
+-        Matrix_SetTranslateRotateYXZ(actor->world.pos.x, actor->world.pos.y + (actor->shape.yOffset * actor->scale.y),
+-                                     actor->world.pos.z, &actor->shape.rot);
++        Vec3f compositeOffset = { 0.0f, 0.0f, 0.0f };
++        if (actor->id == ACTOR_PLAYER) {
++            CompositeArmsOffset(&compositeOffset);
++        }
++        Matrix_SetTranslateRotateYXZ(actor->world.pos.x + compositeOffset.x,
++                                     actor->world.pos.y + compositeOffset.y + (actor->shape.yOffset * actor->scale.y),
++                                     actor->world.pos.z + compositeOffset.z, &actor->shape.rot);
+     }
+ 
+     Matrix_Scale(actor->scale.x, actor->scale.y, actor->scale.z, MTXMODE_APPLY);
+@@ -2784,6 +2797,9 @@ void Actor_Draw(PlayState* play, Actor* actor) {
+     gSPSegment(POLY_OPA_DISP++, 0x06, play->objectCtx.status[actor->objBankIndex].segment);
+     gSPSegment(POLY_XLU_DISP++, 0x06, play->objectCtx.status[actor->objBankIndex].segment);
+ 
++    compositeOpa = POLY_OPA_DISP;
++    compositeXlu = POLY_XLU_DISP;
++
+     if (actor->colorFilterTimer != 0) {
+         Color_RGBA8 color = { 0, 0, 0, 255 };
+ 
+@@ -2816,6 +2832,11 @@ void Actor_Draw(PlayState* play, Actor* actor) {
+         actor->shape.shadowDraw(actor, lights, play);
+     }
+ 
++    if (compositeHidden) {
++        POLY_OPA_DISP = compositeOpa;
++        POLY_XLU_DISP = compositeXlu;
++    }
++
+     CLOSE_DISPS(play->state.gfxCtx);
+     FrameInterpolation_RecordCloseChild();
+ 
+diff --git i/soh/src/code/z_parameter.c w/soh/src/code/z_parameter.c
+index 524ecd89f..c0b6db227 100644
+--- i/soh/src/code/z_parameter.c
++++ w/soh/src/code/z_parameter.c
+@@ -5100,7 +5100,11 @@ const char* digitTextures[] = { gCounterDigit0Tex, gCounterDigit1Tex, gCounterDi
+                                 gCounterDigit2Tex, gCounterDigit3Tex, gCounterDigit4Tex, gCounterDigit5Tex,
+                                 gCounterDigit6Tex, gCounterDigit7Tex, gCounterDigit8Tex };
+ 
++extern int CompositeHideNativeHud(void);
+ void Interface_Draw(PlayState* play) {
++    if (CompositeHideNativeHud()) {
++        return;
++    }
+     static s16 magicArrowEffectsR[] = { 255, 100, 255 };
+     static s16 magicArrowEffectsG[] = { 0, 100, 255 };
+     static s16 magicArrowEffectsB[] = { 0, 255, 100 };
+diff --git i/soh/src/code/z_play.c w/soh/src/code/z_play.c
+index 729edd0e2..683311bfd 100644
+--- i/soh/src/code/z_play.c
++++ w/soh/src/code/z_play.c
+@@ -651,6 +651,7 @@ void Play_Init(GameState* thisx) {
+ #endif
+ }
+ 
++extern void CompositeCamera(Camera* camera);
+ void Play_Update(PlayState* play) {
+     Input* input = play->state.input;
+     s32 isPaused;
+@@ -1275,6 +1276,7 @@ skip:
+         }
+ 
+         Camera_Update(play->cameraPtrs[play->nextCamera]);
++        CompositeCamera(play->cameraPtrs[play->nextCamera]);
+ 
+         PLAY_LOG(3814);
+     }
+diff --git i/soh/src/overlays/actors/ovl_player_actor/z_player.c w/soh/src/overlays/actors/ovl_player_actor/z_player.c
+index 6dc2e125d..c47206c7f 100644
+--- i/soh/src/overlays/actors/ovl_player_actor/z_player.c
++++ w/soh/src/overlays/actors/ovl_player_actor/z_player.c
+@@ -12189,6 +12189,8 @@ static Vec3f sDogSpawnOffset = { 0.0f, 0.0f, -30.0f };
+ 
+ s32 Player_UpdateNoclip(Player* this, PlayState* play);
+ 
++extern void CompositePlayerInput(Player* player, Input* input);
++extern int CompositeFirstPersonArms(void);
+ void Player_Update(Actor* thisx, PlayState* play) {
+     static Vec3f sDogSpawnPos;
+     Player* this = (Player*)thisx;
+@@ -12246,6 +12248,7 @@ void Player_Update(Actor* thisx, PlayState* play) {
+             }
+         }
+ 
++        CompositePlayerInput(this, &input);
+         Player_UpdateCommon(this, play, &input);
+     }
+ 
+@@ -12488,7 +12491,8 @@ void Player_Draw(Actor* thisx, PlayState* play2) {
+             Vec3f projectedHeadPos;
+ 
+             SkinMatrix_Vec3fMtxFMultXYZ(&play->viewProjectionMtxF, &this->actor.focus.pos, &projectedHeadPos);
+-            if (projectedHeadPos.z < -4.0f) {
++            // Minecraft's first-person camera sits inside the head rather than behind it.
++            if (projectedHeadPos.z < -4.0f || CompositeFirstPersonArms()) {
+                 overrideLimbDraw = Player_OverrideLimbDrawGameplayFirstPerson;
+             }
+         } else if (this->stateFlags2 & PLAYER_STATE2_CRAWLING) {

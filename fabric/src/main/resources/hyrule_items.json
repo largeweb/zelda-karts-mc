@@ -1,0 +1,23 @@
+[
+ {"id": 0, "key": "deku_stick", "name": "Deku Stick", "icon": "gItemIconDekuStickTex"},
+ {"id": 1, "key": "deku_nut", "name": "Deku Nut", "icon": "gItemIconDekuNutTex"},
+ {"id": 2, "key": "bomb", "name": "Bomb", "icon": "gItemIconBombTex"},
+ {"id": 3, "key": "fairy_bow", "name": "Fairy Bow", "icon": "gItemIconBowTex"},
+ {"id": 4, "key": "fire_arrow", "name": "Fire Arrow", "icon": "gItemIconArrowFireTex"},
+ {"id": 5, "key": "dins_fire", "name": "Din's Fire", "icon": "gItemIconDinsFireTex"},
+ {"id": 6, "key": "fairy_slingshot", "name": "Fairy Slingshot", "icon": "gItemIconSlingshotTex"},
+ {"id": 8, "key": "ocarina_of_time", "name": "Ocarina of Time", "icon": "gItemIconOcarinaOfTimeTex"},
+ {"id": 9, "key": "bombchu", "name": "Bombchu", "icon": "gItemIconBombchuTex"},
+ {"id": 10, "key": "hookshot", "name": "Hookshot", "icon": "gItemIconHookshotTex"},
+ {"id": 11, "key": "longshot", "name": "Longshot", "icon": "gItemIconLongshotTex"},
+ {"id": 12, "key": "ice_arrow", "name": "Ice Arrow", "icon": "gItemIconArrowIceTex"},
+ {"id": 13, "key": "farores_wind", "name": "Farore's Wind", "icon": "gItemIconFaroresWindTex"},
+ {"id": 14, "key": "boomerang", "name": "Boomerang", "icon": "gItemIconBoomerangTex"},
+ {"id": 15, "key": "lens_of_truth", "name": "Lens of Truth", "icon": "gItemIconLensOfTruthTex"},
+ {"id": 17, "key": "megaton_hammer", "name": "Megaton Hammer", "icon": "gItemIconHammerTex"},
+ {"id": 18, "key": "light_arrow", "name": "Light Arrow", "icon": "gItemIconArrowLightTex"},
+ {"id": 19, "key": "nayrus_love", "name": "Nayru's Love", "icon": "gItemIconNayrusLoveTex"},
+ {"id": 59, "key": "kokiri_sword", "name": "Kokiri Sword", "icon": "gItemIconSwordKokiriTex"},
+ {"id": 60, "key": "master_sword", "name": "Master Sword", "icon": "gItemIconSwordMasterTex"},
+ {"id": 61, "key": "biggoron_sword", "name": "Biggoron's Sword", "icon": "gItemIconSwordBiggoronTex"}
+]

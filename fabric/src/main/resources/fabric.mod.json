@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"hyrule_composite","version":"0.1.0","name":"Hyrule Composite","environment":"client","mixins":["composite.mixins.json"],"depends":{"fabricloader":">=0.19.5","minecraft":"26.3","java":">=25"}}

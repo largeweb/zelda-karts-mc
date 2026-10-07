@@ -1,0 +1,30 @@
+{
+  "required": true,
+  "package": "local.composite.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MinecraftMixin",
+    "TitleScreenMixin",
+    "WorldFrameMixin",
+    "PlayerMoveMixin",
+    "TerrainMixin",
+    "CloudMixin",
+    "WeatherMixin",
+    "NativeUseMixin",
+    "CameraMixin",
+    "LightmapMixin",
+    "ProjectileMixin",
+    "FloorCollisionMixin",
+    "EntityCollisionAccessor",
+    "AvatarDimensionsMixin",
+    "AvatarRenderMixin",
+    "AvatarCutsceneMixin",
+    "CreativeItemsMixin",
+    "CommandsMixin",
+    "BackupMixin",
+    "PipelineMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

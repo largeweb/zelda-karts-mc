@@ -1,0 +1,86 @@
+diff --git a/cmake/dependencies/common.cmake b/cmake/dependencies/common.cmake
+index 80dec56e..7da3fe52 100644
+--- a/cmake/dependencies/common.cmake
++++ b/cmake/dependencies/common.cmake
+@@ -52,7 +52,12 @@ endif()
+ 
+ #=================== STB ===================
+ set(STB_DIR ${CMAKE_BINARY_DIR}/_deps/stb)
+-file(DOWNLOAD "https://github.com/nothings/stb/raw/0bc88af4de5fb022db643c2d8e549a0927749354/stb_image.h" "${STB_DIR}/stb_image.h")
++# Reuse the pinned local header for offline composite rebuilds.
++if(NOT FETCHCONTENT_FULLY_DISCONNECTED)
++    file(DOWNLOAD "https://github.com/nothings/stb/raw/0bc88af4de5fb022db643c2d8e549a0927749354/stb_image.h" "${STB_DIR}/stb_image.h")
++elseif(NOT EXISTS "${STB_DIR}/stb_image.h")
++    message(FATAL_ERROR "Offline build needs the previously fetched pinned stb_image.h")
++endif()
+ file(WRITE "${STB_DIR}/stb_impl.c" "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"")
+ 
+ add_library(stb STATIC)
+diff --git a/src/fast/backends/gfx_sdl2.cpp b/src/fast/backends/gfx_sdl2.cpp
+index 15c5415f..769a4a09 100644
+--- a/src/fast/backends/gfx_sdl2.cpp
++++ b/src/fast/backends/gfx_sdl2.cpp
+@@ -694,6 +694,7 @@ static uint64_t qpc_to_100ns(uint64_t qpc) {
+     return qpc / qpc_freq * _100NANOSECONDS_IN_SECOND + qpc % qpc_freq * _100NANOSECONDS_IN_SECOND / qpc_freq;
+ }
+ 
++extern "C" bool CompositePollCollision() __attribute__((weak));
+ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+     uint64_t t = qpc_to_100ns(SDL_GetPerformanceCounter());
+ 
+@@ -710,8 +711,19 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+ #endif
+     if (left > 0) {
+ #ifndef _WIN32
+-        const timespec spec = { 0, left * 100 };
+-        nanosleep(&spec, nullptr);
++        if (CompositePollCollision && CompositePollCollision()) {
++            // Same game/render thread, stable collision scene. Answer local RPCs
++            // during pacing instead of blocking Minecraft for a whole game tick.
++            while ((t = qpc_to_100ns(SDL_GetPerformanceCounter())) < (uint64_t)next) {
++                CompositePollCollision();
++                const int64_t remaining = next - t;
++                const timespec slice = { 0, std::min<int64_t>(remaining * 100, 1000000) };
++                nanosleep(&slice, nullptr);
++            }
++        } else {
++            const timespec spec = { 0, left * 100 };
++            nanosleep(&spec, nullptr);
++        }
+ #else
+         // The accuracy of this mTimer seems to usually be within +- 1.0 ms
+         LARGE_INTEGER li;
+@@ -737,6 +749,7 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+     previous_time = t;
+ }
+ 
++extern "C" void CompositeExportFrame(SDL_Window*) __attribute__((weak));
+ void GfxWindowBackendSDL2::SwapBuffersBegin() {
+     bool nextVsyncEnabled = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
+ 
+@@ -746,8 +759,24 @@ void GfxWindowBackendSDL2::SwapBuffersBegin() {
+         SDL_RenderSetVSync(mRenderer, mVsyncEnabled ? 1 : 0);
+     }
+ 
++    auto compositeBefore = SDL_GetTicks64();
+     SyncFramerateWithTime();
+-    SDL_GL_SwapWindow(mWnd);
++    auto compositePaced = SDL_GetTicks64();
++    if(CompositeExportFrame)CompositeExportFrame(mWnd);
++    auto compositeCaptured = SDL_GetTicks64();
++    // A frame source has no desktop consumer. Presenting an occluded window
++    // can block in the compositor for seconds; glReadPixels already completes
++    // the backbuffer, which the Minecraft process presents instead.
++    static bool compositePresentedOnce = false;
++    if (!std::getenv("COMPOSITE_FRAME") || !compositePresentedOnce) {
++        SDL_GL_SwapWindow(mWnd); compositePresentedOnce = true;
++    }
++    static uint32_t compositeFrames = 0;
++    if (std::getenv("COMPOSITE_FRAME") && (++compositeFrames % 120 == 0))
++        fprintf(stderr,"[CompositePerf] pacing=%llu capture=%llu swap=%llu ms\n",
++            (unsigned long long)(compositePaced-compositeBefore),
++            (unsigned long long)(compositeCaptured-compositePaced),
++            (unsigned long long)(SDL_GetTicks64()-compositeCaptured));
+ }
+ 
+ void GfxWindowBackendSDL2::SwapBuffersEnd() {
