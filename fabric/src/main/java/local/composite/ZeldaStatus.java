@@ -6,8 +6,9 @@ public final class ZeldaStatus {
  private static int lastDamage=-1,respawnSerial;
  private static boolean wasDead;
  private static volatile int ageSerial,age;
- /** 0 adult, 1 child. Applied by Zelda the next time Link is free to move. */
- public static void requestAge(int value){age=value;ageSerial++;}
+ /** A request to the native game: in Zelda 0 adult or 1 child; on a kart track a character's kart, or getting on or off. */
+ public static void request(int value){age=value;ageSerial++;}
+ public static void requestAge(int value){request(value);}
  public static void tick(Minecraft mc,Shared shm,int epoch){
   var status=shm.snapshot(672,32);
   if(status!=null&&status.getInt(0)==epoch){

@@ -79,6 +79,7 @@ public final class Passthrough {
    if(enter&&!lastGuiOpen)buttons|=1<<19;
    if(InputConstants.isKeyDown(InputConstants.KEY_BACKSPACE))buttons|=1<<20;
    if(InputConstants.isKeyDown(InputConstants.KEY_O))buttons|=1<<27;
+   if(o.keyShift.isDown())buttons|=1<<28;
    if(InputConstants.isKeyDown(InputConstants.KEY_TAB))buttons|=1<<22;
    if(InputConstants.isKeyDown(InputConstants.KEY_UP))buttons|=1<<23;if(InputConstants.isKeyDown(InputConstants.KEY_DOWN))buttons|=1<<24;
    if(InputConstants.isKeyDown(InputConstants.KEY_LEFT))buttons|=1<<25;if(InputConstants.isKeyDown(InputConstants.KEY_RIGHT))buttons|=1<<26;

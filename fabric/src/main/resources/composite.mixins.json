@@ -25,7 +25,8 @@
     "PipelineMixin",
     "ExplosionMixin",
     "BlockChangeMixin",
-    "CreateWorldMixin"
+    "CreateWorldMixin",
+    "ChatMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -22,10 +22,30 @@ index 71a0f9079..639989c56 100644
  }
  
 diff --git i/src/main.c w/src/main.c
-index 1bdbee6e1..033d98c07 100644
+index 1bdbee6e1..60c879cf6 100644
 --- i/src/main.c
 +++ w/src/main.c
-@@ -825,7 +825,9 @@ void race_logic_loop(void) {
+@@ -343,6 +343,7 @@ void init_controllers(void) {
+     }
+ }
+ 
++extern bool CompositeController(struct Controller* controller);
+ void update_controller(s32 index) {
+     struct Controller* controller = &gControllers[index];
+     u16 stick;
+@@ -351,6 +352,11 @@ void update_controller(s32 index) {
+         return;
+     }
+ 
++    // Composite bridge: Minecraft drives controller one.
++    if (index == 0 && CompositeController(controller)) {
++        return;
++    }
++
+     // Prevents pause menu intereference while controlling flycam
+     // Freecam only works with controller 1
+     if ((CVarGetInteger("gFreecam", 0) == 1) && (gGamestate == RACING) && (index == 0)) {
+@@ -825,7 +831,9 @@ void race_logic_loop(void) {
   * until the state changes (ie. Exit menus and start a race).
   */
  
@@ -58,3 +78,16 @@ index 23036adcb..2ccaf7dde 100644
          wnd->DrawAndRunGraphicsCommands(pool, mtxStack);
          interpreter->mInterpolationIndex++;
      }
+diff --git i/src/racing/skybox_and_splitscreen.c w/src/racing/skybox_and_splitscreen.c
+index 18b0e25b5..1f640fe07 100644
+--- i/src/racing/skybox_and_splitscreen.c
++++ w/src/racing/skybox_and_splitscreen.c
+@@ -660,6 +660,8 @@ void render_screens(ScreenContext* screen, s32 mode, s32 someId, s32 playerId) {
+     if (CVarGetInteger("gDrawTrackGeometry", true) == true) {
+         render_track(screen);
+     }
++    // Composite bridge: marks the end of the track's own geometry (see CompositeSceneDrawn).
++    gDPNoOpTag3(gDisplayListHead++, 0x43, NULL, 0);
+     FrameInterpolation_RecordCloseChild();
+ 
+     // Draw dynamic game objects

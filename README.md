@@ -36,9 +36,11 @@ left). It steps through the games that are installed:
   Kokiri Forest with everything unlocked; after that it continues from where
   Zelda last saved (it saves automatically).
 
-- **Mario Kart 64 — <track>** (ten tracks) creates a world on that track, on foot
-  with Minecraft controls and blocks. Early: no karts to drive yet, the track
-  cannot be dug, and the player is the Minecraft character, not Link.
+- **Mario Kart 64 — <track>** (ten tracks) creates a world on that track. You are
+  on foot as your Minecraft character and can place blocks and dig into the track
+  as in Hyrule. `/spawnkart` asks for a character (1–8) and puts you in that
+  character's kart: W accelerate, S brake, A/D steer, Space hop and drift, Shift
+  get off; right-click beside a parked kart with an empty hand to get back on.
 
 Games that are not installed are listed in the button's tooltip with the reason.
 GoldenEye is listed but not supported yet.

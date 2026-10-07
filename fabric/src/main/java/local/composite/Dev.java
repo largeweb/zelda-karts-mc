@@ -18,7 +18,8 @@ public final class Dev {
    var file=ROOT.resolve("startup.json");
    if(!Files.isRegularFile(file))return false;
    var q=JsonParser.parseString(Files.readString(file)).getAsJsonObject();Files.delete(file);
-   if(q.has("screen"))net.minecraft.client.gui.screens.worldselection.CreateWorldScreen.openFresh(mc,()->mc.gui.setScreen(title));
+   if(q.has("open"))mc.createWorldOpenFlows().openWorld(q.get("open").getAsString(),()->mc.gui.setScreen(title));
+   else if(q.has("screen"))net.minecraft.client.gui.screens.worldselection.CreateWorldScreen.openFresh(mc,()->mc.gui.setScreen(title));
    else for(var game:Games.ALL)if(game.id().equals(q.get("game").getAsString()))
     WorldCreator.create(mc,title,game,q.get("create").getAsString(),q.get("create").getAsString(),1,true);
    return true;
@@ -49,7 +50,7 @@ public final class Dev {
     mc.gui.setScreen(null);
    }else if(q.has("move")){
     if(moveKey!=null)moveKey.setDown(false);
-    moveKey=switch(q.get("direction").getAsString()){case "back"->mc.options.keyDown;case "left"->mc.options.keyLeft;case "right"->mc.options.keyRight;case "jump"->mc.options.keyJump;default->mc.options.keyUp;};
+    moveKey=switch(q.get("direction").getAsString()){case "back"->mc.options.keyDown;case "left"->mc.options.keyLeft;case "right"->mc.options.keyRight;case "jump"->mc.options.keyJump;case "sneak"->mc.options.keyShift;default->mc.options.keyUp;};
     moveTicks=Math.clamp(q.get("move").getAsInt(),1,200);moveKey.setDown(true);
    }else if(q.has("attack")){
     attackTicks=Math.max(1,q.get("attack").getAsInt());mc.options.keyAttack.setDown(true);KeyMapping.click(mc.options.keyAttack.getDefaultKey());

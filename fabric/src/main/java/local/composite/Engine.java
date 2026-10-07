@@ -11,6 +11,15 @@ import net.minecraft.world.level.storage.LevelResource;
  */
 public final class Engine {
  private static Process process;private static Path world;
+ private static Games.Game game;private static java.util.Map<String,String> extra=java.util.Map.of();
+ /** The game the open world runs on, or null. */
+ public static Games.Game game(){return process!=null&&process.isAlive()?game:null;}
+ /** Start the open world's engine again with extra settings (the kart engine loads a character with the track). */
+ public static void restart(java.util.Map<String,String> settings){
+  if(game==null||world==null)return;
+  stop();extra=settings;
+  try{start(game,world);}catch(Exception e){System.err.println("Could not restart "+game.title()+": "+e);}
+ }
  static{Runtime.getRuntime().addShutdownHook(new Thread(Engine::stop));}
  public static void tick(Minecraft mc){
   var server=mc.getSingleplayerServer();
@@ -18,11 +27,12 @@ public final class Engine {
   report(mc);
   if(java.util.Objects.equals(open,world))return;
   stop();
-  world=open;
+  world=open;extra=java.util.Map.of();game=null;
   if(open==null)return;
   var game=Games.of(open);
   if(game==Games.MINECRAFT)return;
   if(!game.available()){tell(mc,game.title()+" is not installed: "+game.missing());return;}
+  Engine.game=game;
   try{start(game,open);}
   catch(Exception e){System.err.println("Could not start "+game.title()+": "+e);tell(mc,"Could not start "+game.title()+": "+e.getMessage());}
  }
@@ -50,6 +60,7 @@ public final class Engine {
   env.put("SHIP_HOME",home.toString());env.put("SDL_VIDEODRIVER","x11");
   env.put("COMPOSITE_SHM",shm);env.put("COMPOSITE_FRAME",shm+".rgba");
   if(game.map()!=null)env.put("COMPOSITE_TRACK",game.map());
+  env.putAll(extra);
   var arms=Games.config().get("arms");if(arms!=null)env.put("COMPOSITE_ARMS",arms.getAsString());
   // For testing: begin at a chosen entrance instead of where the save resumes.
   var entrance=Games.config().get("start");if(entrance!=null)env.put("COMPOSITE_START",entrance.getAsString());

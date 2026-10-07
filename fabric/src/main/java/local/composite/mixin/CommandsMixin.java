@@ -10,7 +10,7 @@ import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.*;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-/** /link adult|child switches Link's age; /help [page] is this mod's guide. */
+/** /link adult|child switches Link's age; /spawnkart brings a kart; /help [page] is this mod's guide. */
 @Mixin(Commands.class)
 public class CommandsMixin {
  @Shadow @Final private CommandDispatcher<CommandSourceStack> dispatcher;
@@ -19,6 +19,9 @@ public class CommandsMixin {
   dispatcher.register(Commands.literal("link")
    .then(Commands.literal("adult").executes(context->composite$age(context.getSource(),0,"adult")))
    .then(Commands.literal("child").executes(context->composite$age(context.getSource(),1,"child"))));
+  dispatcher.register(Commands.literal("spawnkart")
+   .executes(context->{local.composite.Karts.ask();return 1;})
+   .then(Commands.argument("character",IntegerArgumentType.integer(1,8)).executes(context->{local.composite.Karts.spawn(IntegerArgumentType.getInteger(context,"character"));return 1;})));
   // Minecraft's own /help lists every command; here it is the guide instead.
   composite$forget(dispatcher.getRoot(),"help");
   dispatcher.register(Commands.literal("help")

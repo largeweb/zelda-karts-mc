@@ -55,7 +55,7 @@ def build(c, jobs):
 
 
 MK64 = {'repository': 'https://github.com/HarbourMasters/SpaghettiKart.git', 'engine': 'mk64-composite.elf'}
-MK64_PATCHED = ['src/port/Engine.cpp', 'src/engine/cameras/FreeCamera.cpp', 'src/main.c']
+MK64_PATCHED = ['src/port/Engine.cpp', 'src/engine/cameras/FreeCamera.cpp', 'src/main.c', 'src/racing/skybox_and_splitscreen.c']
 
 
 def mk64(c, rom, jobs):
