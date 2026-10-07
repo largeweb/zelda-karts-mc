@@ -38,6 +38,8 @@ void Save_SaveFile(void);
 void Play_Init(GameState*);
 }
 
+extern "C" int CompositeGuest();
+
 namespace {
 using namespace composite;
 
@@ -76,7 +78,7 @@ static_assert(sizeof(RenderedCamera) == 44);
 struct Avatar { uint32_t epoch, form; float radius, height, eye; uint32_t mask, flags; };
 struct Status { uint32_t epoch, damage; int32_t rupees, magic, magicMax; uint32_t age, flags, reserved; };
 struct Control { uint32_t epoch, heldItem, ageSerial, age, respawnSerial, flags, reserved[2]; };
-constexpr uint32_t CONTROL_CREATIVE = 1;
+constexpr uint32_t CONTROL_CREATIVE = 1, CONTROL_HIDDEN = 2;
 struct CombatEvent { uint32_t epoch, sequence, kind; float x, y, z, dx, dy, dz, power; };
 static_assert(sizeof(CombatEvent) == 40);
 
@@ -114,6 +116,24 @@ float bodyHeight() { return link()->ageProperties ? link()->ageProperties->ceili
 float avatarHeight() { return LINK_IS_ADULT ? 66.0f : 44.0f; }
 float avatarEye() { return LINK_IS_ADULT ? 60.0f : 38.0f; }
 float bodyRadius() { return link()->ageProperties ? link()->ageProperties->wallCheckRadius : 14.0f; }
+
+float guestShiftX = 0, guestShiftZ = 0;
+// As a guest there is no scene of this game's own to stand on or meet: clear out
+// everything but Link and what he uses, and keep a piece of ground under his feet
+// wherever the host's world says he is standing.
+void guestScene() {
+    for (int category : { ACTORCAT_SWITCH, ACTORCAT_BG, ACTORCAT_NPC, ACTORCAT_ENEMY, ACTORCAT_PROP, ACTORCAT_BOSS, ACTORCAT_DOOR, ACTORCAT_CHEST })
+        for (auto* a = gPlayState->actorCtx.actorLists[category].head; a; a = a->next)
+            if (a->update) Actor_Kill(a);
+    // Always midday, so Link is lit the same wherever the host's world puts him.
+    gSaveContext.dayTime = gSaveContext.skyboxTime = 0x8000;
+    gSaveContext.nightFlag = 0;
+    blocks = {};
+    if (live() && mc.grounded) {
+        blocks.count = 1;
+        blocks.positions[0] = { mc.x - SCALE / 2, mc.y - SCALE, mc.z - SCALE / 2 };
+    }
+}
 
 // Zelda keeps Link when a cutscene, climb, ride or similar scripted motion is running.
 // Some interiors (shops, houses, the Market) are a flat painted backdrop that only makes
@@ -722,7 +742,7 @@ void bridgePlay() {
     previousPad = pad;
 
     BlockLayer nextBlocks{};
-    if (live() && read(shared, BLOCKS, nextBlocks) && nextBlocks.epoch == port.epoch && nextBlocks.count <= MAX_BLOCKS) {
+    if (!CompositeGuest() && live() && read(shared, BLOCKS, nextBlocks) && nextBlocks.epoch == port.epoch && nextBlocks.count <= MAX_BLOCKS) {
         bool valid = true;
         for (uint32_t i = 0; i < nextBlocks.count; i++)
             valid &= finite({ nextBlocks.positions[i].x, nextBlocks.positions[i].y, nextBlocks.positions[i].z });
@@ -743,7 +763,16 @@ void pump() {
             mc = candidate;
             lastTick = mc.tick;
             lastMinecraft = SDL_GetTicks64();
+            if (CompositeGuest()) {
+                // The host's world can be far larger than this game's numbers allow, so
+                // Link and the camera are kept near the middle of this scene, moved together.
+                guestShiftX = -std::round(mc.x / 4096) * 4096;
+                guestShiftZ = -std::round(mc.z / 4096) * 4096;
+                mc.x += guestShiftX;
+                mc.z += guestShiftZ;
+            }
         }
+        if (CompositeGuest()) guestScene();
         bridgePlay();
         target();
     }
@@ -855,8 +884,8 @@ extern "C" bool CompositePollCollision() {
     service();
     return true;
 }
-// Experimental: with COMPOSITE_GUEST set, this game draws only Link and its actors, so
-// its picture can be laid over another game's world.
+// With COMPOSITE_GUEST set this game is a guest in another game's world: it draws only
+// Link and what he uses, and Minecraft lays that picture over the other game's.
 extern "C" int CompositeGuest() {
     static const bool guest = std::getenv("COMPOSITE_GUEST") != nullptr;
     return guest;
@@ -889,6 +918,7 @@ extern "C" void CompositeArmsOffset(Vec3f* offset) {
     offset->z = std::cos(yaw) * std::cos(pitch) * forward;
 }
 extern "C" int CompositeHidePlayer() {
+    if (shared && live() && (control.flags & CONTROL_HIDDEN)) return true; // riding something in the host game
     return shared && live() && storyMC.thirdPerson == 0 && cameraFree() && link()->unk_6AD == 0;
 }
 extern "C" void CompositePlayerInput(Player* player, Input*) {
@@ -907,6 +937,7 @@ extern "C" void CompositeCamera(Camera* c) {
     if (!read(shared, CAMERA, v) || v.epoch != port.epoch || !v.valid || !std::isfinite(v.fov) || v.fov < 20 || v.fov > 150) return;
     if (!finite({ v.x, v.y, v.z, v.yaw, v.pitch })) return;
     float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
+    if (CompositeGuest()) v.x += guestShiftX, v.z += guestShiftZ;
     c->eye = { v.x, v.y, v.z };
     c->eyeNext = c->eye;
     c->at = { v.x - std::sin(yaw) * std::cos(pitch) * 100, v.y - std::sin(pitch) * 100, v.z + std::cos(yaw) * std::cos(pitch) * 100 };
@@ -919,11 +950,22 @@ extern "C" void CompositeCamera(Camera* c) {
 }
 #include "FrameExport.h"
 
+// The projection used for this frame clips nearer than the game's own, which would
+// thicken its fog (fog follows clip-space depth). Give the renderer the depth the
+// game's own planes would have produced at the same distance.
+float fogNear = 0, fogFar = 0, fogScale = 1;
+extern "C" void CompositeFogDepth(float w, float* depth) {
+    if (fogNear <= 0 || fogFar <= fogNear || w <= 0) return;
+    float distance = w / fogScale;
+    *depth = (fogFar + fogNear) / (fogFar - fogNear) - 2 * fogFar * fogNear / ((fogFar - fogNear) * distance);
+}
+
 // Late-latch the world view for every displayed (including interpolated) frame so
 // Zelda's image and Minecraft's blocks share exactly one camera.
 void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     renderedCamera = {};
     renderedNear = renderedFar = 0;
+    fogNear = 0;
     if (!shared || !world()) return;
     renderedNear = gPlayState->view.zNear;
     renderedFar = gPlayState->view.zFar;
@@ -940,8 +982,9 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     const float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
     MtxF look{}, projection{};
     u16 norm;
-    guLookAtF((float (*)[4]) & look, v.x, v.y, v.z, v.x - std::sin(yaw) * std::cos(pitch) * 100, v.y - std::sin(pitch) * 100,
-              v.z + std::cos(yaw) * std::cos(pitch) * 100, 0, 1, 0);
+    const float ex = v.x + (CompositeGuest() ? guestShiftX : 0), ez = v.z + (CompositeGuest() ? guestShiftZ : 0);
+    guLookAtF((float (*)[4]) & look, ex, v.y, ez, ex - std::sin(yaw) * std::cos(pitch) * 100, v.y - std::sin(pitch) * 100,
+              ez + std::cos(yaw) * std::cos(pitch) * 100, 0, 1, 0);
     // The game clips away anything within a quarter of a block of the camera, which up
     // close reads as seeing through nearby walls and ground. Clip as close as Minecraft does.
     const float nearPlane = 0.05f * SCALE;
@@ -949,6 +992,7 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
                    (float)(view.viewport.rightX - view.viewport.leftX) / (view.viewport.bottomY - view.viewport.topY),
                    nearPlane, view.zFar, view.scale);
     renderedNear = nearPlane;
+    fogNear = view.zNear, fogFar = view.zFar, fogScale = view.scale;
     replacements[view.viewingPtr] = look;
     replacements[view.projectionPtr] = projection;
     renderedCamera = { v.epoch, v.x, v.y, v.z, v.yaw, v.pitch, v.fov, 1, acquire(shared + CAMERA), port.scene, renderedCamera.light };

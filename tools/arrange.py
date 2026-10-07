@@ -19,20 +19,22 @@ def main():
     while True:
         owned = sessions(c)
         windows = clients()
-        world = next((w for w in windows if owned.get(w['pid']) == 'Zelda' and w['title'] != 'Console'), None)
+        # One engine per game in play: on a kart track both the kart engine and Zelda (for Link) run.
+        worlds = [w for w in windows if owned.get(w['pid']) == 'Zelda' and w['title'] != 'Console']
         player = next((w for w in windows if owned.get(w['pid']) == 'Minecraft'), None)
-        if world and player:
+        engines = sum(1 for kind in owned.values() if kind == 'Zelda')
+        if worlds and len(worlds) >= engines and player:
             break
         if time.monotonic() >= deadline:
             raise RuntimeError('Launch both games first, then run ./hyrule arrange.')
         time.sleep(1)
     monitor = next(m for m in json.loads(subprocess.check_output(['hyprctl', 'monitors', '-j'])) if m['focused'])
     # Windows are addressed directly, so this never takes keyboard focus from the user.
-    for w in (world, player):
+    for w in (*worlds, player):
         target = 'window=' + json.dumps('address:' + w['address'])
         if not w['floating']:
             dispatch('hl.dsp.window.float({action="set",' + target + '})')
-        if w is world:
+        if w is not player:
             dispatch('hl.dsp.window.move({workspace="name:Zelda-renderer",follow=false,' + target + '})')
         if not w.get('fullscreen'):
             dispatch('hl.dsp.window.resize({x=1280,y=720,relative=false,' + target + '})')

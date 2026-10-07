@@ -117,6 +117,8 @@ public final class Passthrough {
   if(!guiOpen&&InputConstants.isKeyDown(InputConstants.KEY_LALT))buttons|=1<<18;
   ZeldaStatus.tick(mc,shm,epoch);
   ByteBuffer response=buffer(60);response.putInt(epoch).putInt(buttons).putInt(player.getInventory().getSelectedSlot()).putInt(mc.gui.screen()!=null?1:0).putInt(mc.options.getCameraType().ordinal());for(int i=0;i<9;i++)response.putInt(254);response.putInt(0);shm.publish(768,response);
+  // Link as a guest (on a kart track): hand the same state to the second engine. Riding hides him.
+  if(Engine.hasGuest())Guest.tick(shm,(state.getInt(0)&8)!=0);
  }
  public static boolean move(LocalPlayer player,Vec3 desired){
   if(!active())return false;if(locked)return true;

@@ -12,5 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class PipelineMixin {
  @Shadow @Final private static Map<Identifier,RenderPipeline> OPTIONAL_PIPELINES_BY_LOCATION;
  @Inject(method="<clinit>",at=@At("TAIL"))
- private static void composite$pipeline(CallbackInfo ci){OPTIONAL_PIPELINES_BY_LOCATION.put(WorldFrame.PIPELINE.getLocation(),WorldFrame.PIPELINE);}
+ private static void composite$pipeline(CallbackInfo ci){OPTIONAL_PIPELINES_BY_LOCATION.put(WorldFrame.PIPELINE.getLocation(),WorldFrame.PIPELINE);
+  OPTIONAL_PIPELINES_BY_LOCATION.put(local.composite.Guest.PIPELINE.getLocation(),local.composite.Guest.PIPELINE);
+ }
 }

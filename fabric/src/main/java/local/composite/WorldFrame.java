@@ -27,7 +27,7 @@ public final class WorldFrame {
   .withBindGroupLayout(BindGroupLayout.builder().withUniform("ZeldaColor",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("ZeldaDepth",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Carve",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Params",UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Cracks",UniformType.COMBINED_IMAGE_SAMPLER).build())
   .withPrimitiveTopology(PrimitiveTopology.TRIANGLES).withCull(false).withColorTargetState(ColorTargetState.DEFAULT)
   .withDepthStencilState(new DepthStencilState(CompareOp.ALWAYS_PASS,true)).build();
- static final VarHandle INT=MethodHandles.byteBufferViewVarHandle(int[].class,ByteOrder.LITTLE_ENDIAN);
+ public static final VarHandle INT=MethodHandles.byteBufferViewVarHandle(int[].class,ByteOrder.LITTLE_ENDIAN);
  static MappedByteBuffer map;static FileChannel file;static TextureTarget color,depth,carve,params;
  /** Far plane Minecraft renders with while composited. */
  public static float far=1024;
@@ -118,6 +118,8 @@ public final class WorldFrame {
    // Shaders come from the generated resource pack; without it, fall back to no occlusion.
    color.blitAndBlendToTexture(target.getColorTextureView(),null);encoder.clearDepthTexture(target.getDepthTexture(),0.0);
   }
-  encoder.submit();return true;
+  encoder.submit();
+  Guest.draw();
+  return true;
  }
 }

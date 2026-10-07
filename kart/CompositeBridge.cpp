@@ -507,11 +507,22 @@ extern "C" bool CompositeDriveCamera(Camera* camera, Mtx* perspective, Mtx* look
 
 #include "FrameExport.h"
 
+// The projection used for this frame clips nearer than the game's own, which would
+// thicken its fog (fog follows clip-space depth). Give the renderer the depth the
+// game's own planes would have produced at the same distance.
+float fogNear = 0, fogFar = 0, fogScale = 1;
+extern "C" void CompositeFogDepth(float w, float* depth) {
+    if (fogNear <= 0 || fogFar <= fogNear || w <= 0) return;
+    float distance = w / fogScale;
+    *depth = (fogFar + fogNear) / (fogFar - fogNear) - 2 * fogFar * fogNear / ((fogFar - fogNear) * distance);
+}
+
 // Late-latch the view for every displayed (including interpolated) frame so the
 // track's image and Minecraft's blocks share exactly one camera.
 void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     renderedCamera = {};
     renderedNear = renderedFar = 0;
+    fogNear = 0;
     if (!shared || !racing() || !perspectiveMatrix || !lookAtMatrix) return;
     auto* props = CM_GetProps();
     renderedNear = props->NearPersp * K;
@@ -533,6 +544,7 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     const float nearPlane = 0.05f * BLOCK;
     guPerspectiveF(projection.mf, &norm, v.fov, gScreenAspect, nearPlane, props->FarPersp, 1.0f);
     renderedNear = nearPlane * K;
+    fogNear = props->NearPersp, fogFar = props->FarPersp, fogScale = 1;
     replacements[lookAtMatrix] = look;
     replacements[perspectiveMatrix] = projection;
     renderedCamera = { v.epoch, v.x, v.y, v.z, v.yaw, v.pitch, v.fov, 1, acquire(shared + CAMERA), port.scene, 1.0f };

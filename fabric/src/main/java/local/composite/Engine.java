@@ -10,7 +10,9 @@ import net.minecraft.world.level.storage.LevelResource;
  * Minecraft world runs no engine and plays as normal Minecraft.
  */
 public final class Engine {
- private static Process process;private static Path world;
+ private static Process process,guest;private static Path world;
+ /** Whether a second Zelda engine is drawing Link over the host game. */
+ public static boolean hasGuest(){return guest!=null&&guest.isAlive();}
  private static Games.Game game;private static java.util.Map<String,String> extra=java.util.Map.of();
  /** The game the open world runs on, or null. */
  public static Games.Game game(){return process!=null&&process.isAlive()?game:null;}
@@ -67,6 +69,25 @@ public final class Engine {
   var log=new File(world.toFile(),"engine.log");
   builder.redirectErrorStream(true).redirectOutput(log);
   process=builder.start();
+  // On a kart track Link comes along: a second engine that draws only him, if Zelda is installed.
+  if(game.family().equals("mk64")&&Games.OCARINA.available()&&!Games.config().has("no_guest")){
+   var zelda=Games.OCARINA.runtime();var guestHome=world.resolve("oot-guest");
+   Files.createDirectories(guestHome);
+   try(var files=Files.list(zelda)){
+    for(var source:(Iterable<Path>)files::iterator){
+     var name=source.getFileName().toString();
+     if(name.endsWith(".json")&&!Files.exists(guestHome.resolve(name)))Files.copy(source,guestHome.resolve(name));
+    }
+   }
+   var second=new ProcessBuilder(zelda.resolve(Games.OCARINA.engine()).toString()).directory(zelda.toFile());
+   var guestEnv=second.environment();
+   guestEnv.put("SHIP_HOME",guestHome.toString());guestEnv.put("SDL_VIDEODRIVER","x11");
+   guestEnv.put("COMPOSITE_SHM",shm+Guest.SUFFIX);guestEnv.put("COMPOSITE_FRAME",shm+Guest.SUFFIX+".rgba");
+   guestEnv.put("COMPOSITE_GUEST","1");guestEnv.put("COMPOSITE_START","0xEE"); // Kokiri Forest for its even daylight, cleared of everything but Link
+   second.redirectErrorStream(true).redirectOutput(new File(world.toFile(),"guest-engine.log"));
+   Guest.reset();
+   guest=second.start();
+  }
   // Optional helper that parks the engine's window out of the way (desktop specific).
   var arrange=Games.config().get("arrange");
   if(arrange!=null){
@@ -79,12 +100,14 @@ public final class Engine {
  /** Messages wait until the player is in the world to read them. */
  public static void report(Minecraft mc){if(pending!=null&&mc.player!=null){mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal(pending));pending=null;}}
  public static synchronized void stop(){
-  var running=process;process=null;
-  if(running==null||!running.isAlive())return;
-  running.destroy();
-  try{
-   // The engine saves as it goes; it can hang in teardown after releasing everything.
-   if(!running.waitFor(4,TimeUnit.SECONDS))running.destroyForcibly();
-  }catch(InterruptedException e){running.destroyForcibly();}
+  for(var running:new Process[]{process,guest}){
+   if(running==null||!running.isAlive())continue;
+   running.destroy();
+   try{
+    // The engine saves as it goes; it can hang in teardown after releasing everything.
+    if(!running.waitFor(4,TimeUnit.SECONDS))running.destroyForcibly();
+   }catch(InterruptedException e){running.destroyForcibly();}
+  }
+  process=null;guest=null;
  }
 }

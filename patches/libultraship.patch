@@ -85,10 +85,34 @@ index 15c5415f..769a4a09 100644
  
  void GfxWindowBackendSDL2::SwapBuffersEnd() {
 diff --git i/src/fast/interpreter.cpp w/src/fast/interpreter.cpp
-index 2b51ad7f..c0b77199 100644
+index 2b51ad7f..c9294f4c 100644
 --- i/src/fast/interpreter.cpp
 +++ w/src/fast/interpreter.cpp
-@@ -3331,12 +3331,20 @@ bool gfx_invalidate_tex_cache_handler_f3dex2(F3DGfx** cmd) {
+@@ -71,6 +71,8 @@ std::stack<std::string> currentDir;
+ 
+ #define TEXTURE_CACHE_MAX_SIZE 1024
+ 
++extern "C" void CompositeFogDepth(float w, float* depth) __attribute__((weak));
++
+ namespace Fast {
+ 
+ static UcodeHandlers ucode_handler_index = ucode_f3dex2;
+@@ -1756,7 +1758,13 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
+                 winv = std::numeric_limits<int16_t>::max();
+             }
+ 
+-            float fog_z = z * winv * mRsp->fog_mul + mRsp->fog_offset;
++            // Composite bridge: when it draws with a nearer clipping plane than the game
++            // set its fog up for, fog is still worked out as the game meant it.
++            float fogDepth = z * winv;
++            if (CompositeFogDepth) {
++                CompositeFogDepth(w, &fogDepth);
++            }
++            float fog_z = fogDepth * mRsp->fog_mul + mRsp->fog_offset;
+             fog_z = Ship::Math::clamp(fog_z, 0.0f, 255.0f);
+             d->color.a = fog_z; // Use alpha variable to store fog factor
+         } else {
+@@ -3331,12 +3339,20 @@ bool gfx_invalidate_tex_cache_handler_f3dex2(F3DGfx** cmd) {
      return false;
  }
  
