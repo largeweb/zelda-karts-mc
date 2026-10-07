@@ -15,6 +15,9 @@ public final class NativeAvatar {
  private static Entity attachedPlayer;
  private static volatile float radius=14,height=40,eye=34;
  private static int epoch;
+ private static volatile boolean ownBody=true;
+ /** Whether the native game draws the player; if not, Minecraft's own player model is shown. */
+ public static boolean drawnByGame(Entity entity){return owns(entity)&&ownBody;}
  public static boolean owns(Entity entity){return Passthrough.active()&&entity instanceof Player&&entity.getUUID().equals(owner);}
  public static EntityDimensions dimensions(Entity entity,Pose pose){
   if(!owns(entity))return null;
@@ -27,6 +30,7 @@ public final class NativeAvatar {
   boolean newPlayer=attachedPlayer!=mc.player||epoch!=currentEpoch;attachedPlayer=mc.player;epoch=currentEpoch;owner=mc.player.getUUID();
   var avatar=shm.snapshot(640,28);
   if(avatar!=null&&avatar.getInt(0)==epoch){
+   ownBody=(avatar.getInt(24)&64)==0;
    float r=avatar.getFloat(8),h=avatar.getFloat(12),e=avatar.getFloat(16);
    if(Float.isFinite(r)&&Float.isFinite(h)&&Float.isFinite(e)&&r>=5&&r<=40&&h>=12&&h<=120&&e>0&&e<=h){
     if(newPlayer||radius!=r||height!=h||eye!=e){radius=r;height=h;eye=e;mc.player.refreshDimensions();var uuid=owner;var server=mc.getSingleplayerServer();

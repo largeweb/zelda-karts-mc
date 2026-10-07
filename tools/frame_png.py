@@ -6,7 +6,7 @@ from pathlib import Path
 def save(frame_path, out_path):
     data = Path(frame_path).read_bytes()
     _, magic, width, height, _ = struct.unpack_from('<5I', data, 0)
-    if magic != 0x46524D31 or not width or not height:
+    if magic not in (0x46524D31, 0x46524D32) or not width or not height:
         raise SystemExit('No frame has been exported yet.')
     stride = width * 4
     rows = (data[64 + y * stride:64 + (y + 1) * stride] for y in range(height - 1, -1, -1))

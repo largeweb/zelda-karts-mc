@@ -36,8 +36,12 @@ left). It steps through the games that are installed:
   Kokiri Forest with everything unlocked; after that it continues from where
   Zelda last saved (it saves automatically).
 
+- **Mario Kart 64 — <track>** (ten tracks) creates a world on that track, on foot
+  with Minecraft controls and blocks. Early: no karts to drive yet, the track
+  cannot be dug, and the player is the Minecraft character, not Link.
+
 Games that are not installed are listed in the button's tooltip with the reason.
-GoldenEye and Mario Kart are listed but not supported yet.
+GoldenEye is listed but not supported yet.
 
 The Ship of Harkinian window lives on the `Zelda-renderer` workspace and must
 stay open while an Ocarina of Time world is.
@@ -57,6 +61,10 @@ your account and has launched Minecraft 26.3 with Fabric once.
 ```
 
 Without the extract step only plain Minecraft worlds can be created.
+
+For Mario Kart tracks, also run `./hyrule mk64 /path/to/your/mk64.z64` (it fetches
+and builds SpaghettiKart, the Mario Kart 64 PC port, and extracts your ROM), then
+`./hyrule install`.
 
 ## Controls
 

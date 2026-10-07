@@ -1,0 +1,60 @@
+diff --git i/src/engine/cameras/FreeCamera.cpp w/src/engine/cameras/FreeCamera.cpp
+index 71a0f9079..639989c56 100644
+--- i/src/engine/cameras/FreeCamera.cpp
++++ w/src/engine/cameras/FreeCamera.cpp
+@@ -34,6 +34,7 @@ void FreeCamera::SetActive(bool state) {
+     }
+ }
+ 
++extern "C" bool CompositeDriveCamera(Camera* camera, Mtx* perspective, Mtx* lookAt);
+ void FreeCamera::Tick() {
+     if (!bActive) { return; }
+     if (nullptr == _camera) {
+@@ -41,6 +42,10 @@ void FreeCamera::Tick() {
+         return;
+     }
+ 
++    // Composite bridge: Minecraft places this camera when a session is running.
++    if (CompositeDriveCamera(_camera, &PerspectiveMatrix, &LookAtMatrix)) {
++        return;
++    }
+     freecam_loop(_camera);
+ }
+ 
+diff --git i/src/main.c w/src/main.c
+index 1bdbee6e1..033d98c07 100644
+--- i/src/main.c
++++ w/src/main.c
+@@ -825,7 +825,9 @@ void race_logic_loop(void) {
+  * until the state changes (ie. Exit menus and start a race).
+  */
+ 
++extern void CompositeTick(void);
+ void game_state_handler(void) {
++    CompositeTick();
+     FrameInterpolation_StartRecord();
+ 
+ #if DVDL
+diff --git i/src/port/Engine.cpp w/src/port/Engine.cpp
+index 23036adcb..2ccaf7dde 100644
+--- i/src/port/Engine.cpp
++++ w/src/port/Engine.cpp
+@@ -399,6 +399,7 @@ void GameEngine::StartFrame() const {
+ //     Instance->context->GetWindow()->MainLoop(run_one_game_iter);
+ // }
+ 
++void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements);
+ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements) {
+     auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetRawInstance()->GetWindow());
+ 
+@@ -413,7 +414,9 @@ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx
+ 
+     interpreter->mInterpolationIndex = 0;
+ 
+-    for (const auto& mtxStack : mtx_replacements) {
++    for (auto mtxStack : mtx_replacements) {
++        // Composite bridge: this frame is drawn from Minecraft's camera.
++        CompositeLateCamera(mtxStack);
+         wnd->DrawAndRunGraphicsCommands(pool, mtxStack);
+         interpreter->mInterpolationIndex++;
+     }

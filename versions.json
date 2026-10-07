@@ -5,5 +5,7 @@
   "soh_repository": "https://github.com/HarbourMasters/Shipwright.git",
   "soh_tag": "9.3.0",
   "soh_commit": "ecd889c2019b87e78b0a3d942a6a3fe98b7efaed",
-  "libultraship_commit": "62e973aeb4a53ad4d22bb91e2d9373ecdfcd246c"
+  "libultraship_commit": "62e973aeb4a53ad4d22bb91e2d9373ecdfcd246c",
+  "mk64_repository": "https://github.com/HarbourMasters/SpaghettiKart.git",
+  "mk64_commit": "2b3ddb4a579887d7ab41c56445691b9411996399"
 }

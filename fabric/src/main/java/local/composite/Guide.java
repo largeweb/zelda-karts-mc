@@ -48,7 +48,8 @@ public final class Guide {
    "Hyrule's original ground or wall, or the dirt or stone that was behind it.",
    "Any hoe works. A hoe does nothing to blocks placed anywhere else.")),
   new Page("Worlds and saving",List.of(
-   "Create New World has a Map button: plain Minecraft, or Ocarina of Time.",
+   "Create New World has a Map button: plain Minecraft, Ocarina of Time, or a Mario Kart 64 track.",
+   "Mario Kart tracks are on foot for now, with Minecraft blocks; no karts or digging yet.",
    "An Ocarina of Time world has its own Zelda save and starts Zelda when you open it.",
    "Zelda saves by itself as you play. Reopening continues from where Zelda puts you,",
    "which for adult Link is usually the Temple of Time.",

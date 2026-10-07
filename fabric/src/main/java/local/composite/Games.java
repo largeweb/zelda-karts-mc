@@ -9,20 +9,31 @@ import net.minecraft.client.Minecraft;
  * Paths come from config/hyrule.json in the game directory, written by the installer.
  */
 public final class Games {
- public record Game(String id,String title,String engine,String assets,String missing){
+ /**
+  * @param family which engine runs it; its folder is the "<family>_runtime" setting
+  * @param map    for engines with several maps, the one this world is on
+  */
+ public record Game(String id,String title,String family,String engine,String assets,String map,String missing){
   /** Folder holding this game's engine and extracted assets, or null if not configured. */
-  public Path runtime(){var element=config().get(id+"_runtime");return element==null?null:Path.of(element.getAsString());}
+  public Path runtime(){var element=config().get(family+"_runtime");return element==null?null:Path.of(element.getAsString());}
   public boolean available(){
-   if(id.equals("minecraft"))return true;
+   if(this==MINECRAFT)return true;
    var runtime=runtime();
    return engine!=null&&runtime!=null&&Files.isExecutable(runtime.resolve(engine))&&Files.isRegularFile(runtime.resolve(assets));
   }
  }
- public static final Game MINECRAFT=new Game("minecraft","Minecraft",null,null,null);
- public static final Game OCARINA=new Game("oot","Ocarina of Time","soh-composite.elf","oot.o2r","Needs your Ocarina of Time ROM: run ./hyrule extract");
- public static final List<Game> ALL=List.of(MINECRAFT,OCARINA,
-  new Game("goldeneye","GoldenEye 007",null,null,"GoldenEye maps are not supported yet"),
-  new Game("mk64","Mario Kart 64",null,null,"Mario Kart tracks are not supported yet"));
+ public static final Game MINECRAFT=new Game("minecraft","Minecraft",null,null,null,null,null);
+ public static final Game OCARINA=new Game("oot","Ocarina of Time","oot","soh-composite.elf","oot.o2r",null,"Needs your Ocarina of Time ROM: run ./hyrule extract");
+ public static final List<Game> ALL=all();
+ private static List<Game> all(){
+  var games=new ArrayList<Game>(List.of(MINECRAFT,OCARINA));
+  String[][] tracks={{"luigi_raceway","Luigi Raceway"},{"mario_raceway","Mario Raceway"},{"moo_moo_farm","Moo Moo Farm"},{"koopa_troopa_beach","Koopa Troopa Beach"},
+   {"kalimari_desert","Kalimari Desert"},{"choco_mountain","Choco Mountain"},{"royal_raceway","Royal Raceway"},{"bowsers_castle","Bowser's Castle"},
+   {"rainbow_road","Rainbow Road"},{"block_fort","Block Fort"}};
+  for(var track:tracks)games.add(new Game("mk64/"+track[0],"Mario Kart 64 — "+track[1],"mk64","mk64-composite.elf","mk64.o2r","mk:"+track[0],"Needs your Mario Kart 64 ROM: run ./hyrule mk64 ROM"));
+  games.add(new Game("goldeneye","GoldenEye 007","goldeneye",null,null,null,"GoldenEye maps are not supported yet"));
+  return List.copyOf(games);
+ }
  private static final String MARKER="hyrule-world.json";
  private static JsonObject config;
  public static JsonObject config(){

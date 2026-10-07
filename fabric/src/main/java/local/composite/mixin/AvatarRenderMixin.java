@@ -9,5 +9,5 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(EntityRenderDispatcher.class)
 public class AvatarRenderMixin {
  @Inject(method="shouldRender",at=@At("HEAD"),cancellable=true)
- private void composite$avatar(Entity entity,Frustum frustum,double x,double y,double z,float tick,CallbackInfoReturnable<Boolean> ci){if(NativeAvatar.owns(entity))ci.setReturnValue(false);}
+ private void composite$avatar(Entity entity,Frustum frustum,double x,double y,double z,float tick,CallbackInfoReturnable<Boolean> ci){if(NativeAvatar.drawnByGame(entity))ci.setReturnValue(false);}
 }

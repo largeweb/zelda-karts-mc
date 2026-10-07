@@ -13,6 +13,9 @@ a game, a ROM, or an asset extracted from one.
   it and includes lines of its source as context. Its repository carries no
   licence file at the pinned commit; the build fetches it from upstream and this
   repository does not redistribute it.
+- **SpaghettiKart** (HarbourMasters): `patches/mk64.patch` modifies it and includes
+  lines of its source as context. The build fetches it from upstream; it is not
+  redistributed here.
 - **Minecraft** and **Fabric Loader** are compiled against from the user's own
   installation and are not included.
 

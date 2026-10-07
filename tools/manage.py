@@ -54,6 +54,39 @@ def build(c, jobs):
     run([sys.executable, ROOT / 'fabric/build.py'])
 
 
+MK64 = {'repository': 'https://github.com/HarbourMasters/SpaghettiKart.git', 'engine': 'mk64-composite.elf'}
+MK64_PATCHED = ['src/port/Engine.cpp', 'src/engine/cameras/FreeCamera.cpp', 'src/main.c']
+
+
+def mk64(c, rom, jobs):
+    """Fetch, patch, build and extract Mario Kart 64 (SpaghettiKart) into .local/runtime-mk64."""
+    source = ROOT / '.local/mk64'
+    if not source.exists():
+        run(['git', 'clone', '--recursive', MK64['repository'], source])
+        run(['git', '-C', source, 'checkout', '--detach', VERSIONS['mk64_commit']])
+        run(['git', '-C', source, 'submodule', 'update', '--init', '--recursive'])
+    apply_patch(source, ROOT / 'patches/mk64.patch')
+    apply_patch(source / 'libultraship', ROOT / 'patches/libultraship.patch')
+    hook = source / 'src/port/composite'
+    hook.mkdir(parents=True, exist_ok=True)
+    for p in (ROOT / 'ship/Protocol.h', ROOT / 'ship/FrameExport.h', ROOT / 'kart/CompositeBridge.cpp'):
+        shutil.copy2(p, hook / p.name)
+    build_dir = source / 'build-cmake'
+    run(['cmake', '-S', source, '-B', build_dir, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release'])
+    run(['cmake', '--build', build_dir, '--parallel', str(jobs)])
+    if rom:
+        shutil.copy2(Path(rom).resolve(), source / 'baserom.us.z64')
+    if (source / 'baserom.us.z64').is_file():
+        run(['cmake', '--build', build_dir, '--target', 'ExtractAssets'])
+    runtime = ROOT / '.local/runtime-mk64'
+    runtime.mkdir(parents=True, exist_ok=True)
+    atomic_copy(build_dir / 'Spaghettify', runtime / MK64['engine'])
+    for name in ('mk64.o2r', 'spaghetti.o2r'):
+        if (build_dir / name).is_file():
+            atomic_copy(build_dir / name, runtime / name)
+    print('Mario Kart 64 ready in', runtime)
+
+
 def extract(c, rom):
     """Ship of Harkinian extracts a ROM given on its command line, then waits at a prompt; close it there."""
     runtime = Path(c['runtime'])
@@ -134,7 +167,7 @@ def install(c):
     # helper that parks the engine's window. World types in Create New World follow from this.
     config_dir = mc / 'config'
     shutil.copytree(generated / 'hyrule-dimension', config_dir / 'hyrule/hyrule-dimension', dirs_exist_ok=True)
-    settings = {'oot_runtime': c['runtime']}
+    settings = {'oot_runtime': c['runtime'], 'mk64_runtime': str(ROOT / '.local/runtime-mk64')}
     if c.get('arms'):
         settings['arms'] = str(c['arms'])
     if c.get('start'):
@@ -179,7 +212,7 @@ def native_env(c, bridged=True):
 def sessions(c):
     """Only this project's two processes: matched by binary path, working directory and bridge argument."""
     found = {}
-    binary = (Path(c['runtime']) / NATIVE).resolve()
+    binaries = {(Path(c['runtime']) / NATIVE).resolve(), (ROOT / '.local/runtime-mk64' / MK64['engine']).resolve()}
     mc = minecraft(c).resolve()
     for proc in Path('/proc').glob('[0-9]*'):
         try:
@@ -187,7 +220,7 @@ def sessions(c):
             # A rebuilt binary replaces the file a running game was started from.
             exe = Path(str((proc / 'exe').resolve()).removesuffix(' (deleted)'))
             cwd = (proc / 'cwd').resolve()
-            if exe == binary:
+            if exe in binaries:
                 found[int(proc.name)] = 'Zelda'
             elif exe.name == 'java' and ('-Dcomposite.shm=' + c['shm']).encode() in args and cwd == mc:
                 found[int(proc.name)] = 'Minecraft'
@@ -311,6 +344,9 @@ def main():
         sub.add_parser(name)
     b = sub.add_parser('build')
     b.add_argument('--jobs', type=int, default=min(16, os.cpu_count() or 2))
+    m = sub.add_parser('mk64')
+    m.add_argument('rom', nargs='?', help='path to your own Mario Kart 64 (USA) ROM dump')
+    m.add_argument('--jobs', type=int, default=min(16, os.cpu_count() or 2))
     e = sub.add_parser('extract')
     e.add_argument('rom', help='path to your own supported Ocarina of Time ROM dump')
     a = parser.parse_args()
@@ -321,6 +357,8 @@ def main():
         build(c, max(1, a.jobs))
     elif a.cmd == 'build-fabric':
         run([sys.executable, ROOT / 'fabric/build.py'])
+    elif a.cmd == 'mk64':
+        mk64(c, a.rom, max(1, a.jobs))
     elif a.cmd == 'extract':
         extract(c, a.rom)
     elif a.cmd == 'assets':
@@ -345,6 +383,9 @@ def main():
         # Developer helper: record the current edits in the source checkout as patches/soh.patch.
         diff = subprocess.check_output(['git', '-C', c['source'], 'diff', '--', *PATCHED], text=True)
         (ROOT / 'patches/soh.patch').write_text(diff)
+        if (ROOT / '.local/mk64').is_dir():
+            diff = subprocess.check_output(['git', '-C', str(ROOT / '.local/mk64'), 'diff', '--', *MK64_PATCHED], text=True)
+            (ROOT / 'patches/mk64.patch').write_text(diff)
         print('Wrote patches/soh.patch')
     else:
         state = ROOT / '.local'

@@ -31,7 +31,10 @@ public final class Engine {
   * folder inside the world.
   */
  private static void start(Games.Game game,Path world)throws Exception{
-  var runtime=game.runtime();var home=world.resolve(game.id());
+  var runtime=game.runtime();
+  // Zelda keeps a save per world. The kart engine has nothing to save and only finds
+  // its game archive in its home folder, so it runs from its shared folder.
+  var home=game==Games.OCARINA?world.resolve(game.family()):runtime;
   Files.createDirectories(home);
   // Only settings are copied in. The engine finds its program and game archives beside
   // its executable; Minecraft refuses to open worlds that contain symbolic links.
@@ -46,10 +49,11 @@ public final class Engine {
   var env=builder.environment();
   env.put("SHIP_HOME",home.toString());env.put("SDL_VIDEODRIVER","x11");
   env.put("COMPOSITE_SHM",shm);env.put("COMPOSITE_FRAME",shm+".rgba");
+  if(game.map()!=null)env.put("COMPOSITE_TRACK",game.map());
   var arms=Games.config().get("arms");if(arms!=null)env.put("COMPOSITE_ARMS",arms.getAsString());
   // For testing: begin at a chosen entrance instead of where the save resumes.
   var entrance=Games.config().get("start");if(entrance!=null)env.put("COMPOSITE_START",entrance.getAsString());
-  var log=new File(home.toFile(),"engine.log");
+  var log=new File(world.toFile(),"engine.log");
   builder.redirectErrorStream(true).redirectOutput(log);
   process=builder.start();
   // Optional helper that parks the engine's window out of the way (desktop specific).
