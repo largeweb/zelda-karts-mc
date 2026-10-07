@@ -20,15 +20,27 @@ JDK 25, Ship of Harkinian 9.3.0.
 ## Running
 
 ```bash
-./hyrule start      # start the pair
+./hyrule start      # start Minecraft
 ./hyrule status
 ./hyrule arrange    # put the Minecraft window centre-screen, park Zelda's window
 ./hyrule restart
-./hyrule stop       # Minecraft saves and quits; other applications are untouched
+./hyrule stop       # Minecraft saves and quits, taking the game engine with it
 ```
 
-Play in the **Minecraft x Ocarina of Time** window. The Ship of Harkinian window
-lives on the `Zelda-renderer` workspace and must stay open.
+In Minecraft, **Singleplayer → Create New World** has a **Map** button (bottom
+left). It steps through the games that are installed:
+
+- **Minecraft** creates an ordinary Minecraft world.
+- **Ocarina of Time** creates a world paired with its own Zelda save. Opening the
+  world starts Zelda; leaving it stops Zelda. A new world begins as adult Link in
+  Kokiri Forest with everything unlocked; after that it continues from where
+  Zelda last saved (it saves automatically).
+
+Games that are not installed are listed in the button's tooltip with the reason.
+GoldenEye and Mario Kart are listed but not supported yet.
+
+The Ship of Harkinian window lives on the `Zelda-renderer` workspace and must
+stay open while an Ocarina of Time world is.
 
 ## First-time setup
 
@@ -40,9 +52,11 @@ your account and has launched Minecraft 26.3 with Fabric once.
 ./hyrule fetch-source          # clone pinned Ship of Harkinian into .local/soh
 ./hyrule build                 # apply patches, build the game and the Fabric mod
 ./hyrule extract /path/to/your/oot.z64
-./hyrule setup                 # Prism instance, world, item icons, dimension
+./hyrule setup                 # Prism instance, item icons, dimension, mod settings
 ./hyrule start
 ```
+
+Without the extract step only plain Minecraft worlds can be created.
 
 ## Controls
 
@@ -91,8 +105,6 @@ has been dug is saved with the Minecraft world in `hyrule-digging.dat`.
 ## Known gaps
 
 - Zelda enemies and items still treat a dug floor as solid.
-- The session always starts as adult Link in Kokiri Forest on a debug save with
-  everything unlocked. A Minecraft world is not yet tied to its own Zelda save.
 - Shields, tunics and boots are not items yet; bottles and trade items neither.
 - Not yet multiplayer.
 

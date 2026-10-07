@@ -13,8 +13,9 @@ public class TitleScreenMixin {
     @Unique private int composite$ticks;
     @Inject(method="tick",at=@At("TAIL"))
     private void composite$open(CallbackInfo ci){
-        if(composite$opened || ++composite$ticks<40)return;
+        if(composite$opened || ++composite$ticks<40 || !local.composite.Dev.enabled())return;
         var mc=Minecraft.getInstance();
+        if(local.composite.Dev.startup(mc,(TitleScreen)(Object)this)){composite$opened=true;return;}
         if(!Files.isDirectory(mc.gameDirectory.toPath().resolve("saves/Hyrule_World")))return;
         composite$opened=true;
         mc.createWorldOpenFlows().openWorld("Hyrule_World",()->mc.gui.setScreen((TitleScreen)(Object)this));

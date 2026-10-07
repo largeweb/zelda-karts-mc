@@ -12,5 +12,5 @@ public class MinecraftMixin {
         if(local.composite.Passthrough.ENABLED)org.lwjgl.sdl.SDLVideo.SDL_SetWindowTitle(((Minecraft)(Object)this).getWindow().handle(),"Minecraft x Ocarina of Time");
     }
     @Inject(method="tick",at=@At("TAIL"))
-    private void composite$tick(CallbackInfo ci){Bridge.tick((Minecraft)(Object)this);local.composite.Dev.tick((Minecraft)(Object)this);local.composite.Lifecycle.tick((Minecraft)(Object)this);}
+    private void composite$tick(CallbackInfo ci){Bridge.tick((Minecraft)(Object)this);local.composite.Dev.tick((Minecraft)(Object)this);local.composite.Lifecycle.tick((Minecraft)(Object)this);local.composite.Engine.tick((Minecraft)(Object)this);}
 }

@@ -24,7 +24,8 @@
     "BackupMixin",
     "PipelineMixin",
     "ExplosionMixin",
-    "BlockChangeMixin"
+    "BlockChangeMixin",
+    "CreateWorldMixin"
   ],
   "injectors": {
     "defaultRequire": 1

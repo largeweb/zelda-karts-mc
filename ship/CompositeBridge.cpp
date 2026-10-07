@@ -6,6 +6,7 @@
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/Enhancements/SwitchAge.h"
 #include "soh/ShipInit.hpp"
+#include "soh/SaveManager.h"
 #include <SDL2/SDL.h>
 #include <libultraship/libultraship.h>
 #include <spdlog/spdlog.h>
@@ -32,6 +33,8 @@ extern SaveContext gSaveContext;
 extern PlayState* gPlayState;
 void EnArrow_Fly(EnArrow*, PlayState*);
 void Sram_InitDebugSave(void);
+void Sram_OpenSave(void);
+void Save_SaveFile(void);
 void Play_Init(GameState*);
 }
 
@@ -78,6 +81,8 @@ RenderedCamera renderedCamera{};
 // Near and far planes of the frame being rendered, for converting its depth buffer.
 float renderedNear = 0, renderedFar = 0;
 bool active = false, sceneReady = false;
+// A new world's save is first written once the game is running; saving during boot races.
+bool saveWhenReady = false;
 uint32_t lastTick = 0, lastReply = 0, damageTotal = 0;
 uint64_t lastMinecraft = 0;
 uint32_t previousControls = 0, ageSeen = 0, respawnSeen = 0, lastCombat = 0;
@@ -138,6 +143,10 @@ void start() {
     lastMinecraft = 0;
     lastTick = 0;
     active = true;
+    if (saveWhenReady) {
+        saveWhenReady = false;
+        SaveManager::Instance->SaveSection(gSaveContext.fileNum, SECTION_ID_BASE, false);
+    }
     spdlog::info("[Composite] Scene {} ready, epoch {}", gPlayState->sceneNum, port.epoch);
 }
 
@@ -660,20 +669,30 @@ void bootIntoGame(void* gameState) {
     if (booted) return;
     booted = true;
     auto* state = (GameState*)gameState;
+    // The engine's home directory belongs to one Minecraft world, so file 1 there is
+    // that world's Zelda save: continue it, or start it with everything unlocked.
     gSaveContext.gameMode = GAMEMODE_NORMAL;
-    gSaveContext.fileNum = 0xFE;
-    Sram_InitDebugSave();
-    gSaveContext.fileNum = 0xFF;
+    const bool continuing = SaveManager::Instance->SaveFile_Exist(0);
+    if (continuing) {
+        gSaveContext.fileNum = 0;
+        Sram_OpenSave();
+    } else {
+        gSaveContext.fileNum = 0xFE;
+        Sram_InitDebugSave();
+        gSaveContext.fileNum = 0;
+        gSaveContext.linkAge = LINK_AGE_ADULT;
+        gSaveContext.nightFlag = 0;
+        gSaveContext.skyboxTime = gSaveContext.dayTime = 0x8000;
+    }
     gSaveContext.sceneLayer = 0;
     gSaveContext.cutsceneIndex = 0;
-    gSaveContext.linkAge = LINK_AGE_ADULT;
-    gSaveContext.nightFlag = 0;
-    gSaveContext.skyboxTime = gSaveContext.dayTime = 0x8000;
     for (auto& status : gSaveContext.buttonStatus) status = BTN_ENABLED;
     gSaveContext.nextHudVisibilityMode = gSaveContext.hudVisibilityMode = gSaveContext.hudVisibilityModeTimer = 0;
     gSaveContext.forceRisingButtonAlphas = 0;
     const char* entrance = std::getenv("COMPOSITE_START");
-    gSaveContext.entranceIndex = entrance ? (s32)std::strtol(entrance, nullptr, 0) : ENTR_KOKIRI_FOREST_0;
+    if (entrance) gSaveContext.entranceIndex = (s32)std::strtol(entrance, nullptr, 0);
+    else if (!continuing) gSaveContext.entranceIndex = ENTR_KOKIRI_FOREST_0;
+    saveWhenReady = !continuing;
     gSaveContext.seqId = (u8)NA_BGM_DISABLED;
     gSaveContext.natureAmbienceId = 0xFF;
     gSaveContext.showTitleCard = false;
@@ -706,6 +725,8 @@ void init() {
     CVarSetInteger(CVAR_SETTING("InterpolationFPS"), 60);
     // Aiming and targeting add a cinematic letterbox that would cover Minecraft's view.
     CVarSetInteger(CVAR_ENHANCEMENT("DisableBlackBars"), 1);
+    // Progress is written to the world's save as it happens; there is no file select to return to.
+    CVarSetInteger(CVAR_ENHANCEMENT("Autosave"), 1);
     port.epoch = (uint32_t)getpid();
     std::memset(shared, 0, SIZE);
     release(shared, MAGIC);

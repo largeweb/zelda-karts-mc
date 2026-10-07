@@ -130,6 +130,18 @@ def install(c):
     world = mc / 'saves' / WORLD
     if world.is_dir():
         shutil.copytree(generated / 'hyrule-dimension', world / 'datapacks/hyrule-dimension', dirs_exist_ok=True)
+    # What the mod needs to know: where each game's engine and assets are, and an optional
+    # helper that parks the engine's window. World types in Create New World follow from this.
+    config_dir = mc / 'config'
+    shutil.copytree(generated / 'hyrule-dimension', config_dir / 'hyrule/hyrule-dimension', dirs_exist_ok=True)
+    settings = {'oot_runtime': c['runtime']}
+    if c.get('arms'):
+        settings['arms'] = str(c['arms'])
+    if shutil.which('hyprctl'):
+        settings['arrange'] = [sys.executable, str(ROOT / 'tools/arrange.py'), '--wait']
+    (config_dir / 'hyrule.json').write_text(json.dumps(settings, indent=2) + '\n')
+    if world.is_dir() and not (world / 'hyrule-world.json').exists():
+        (world / 'hyrule-world.json').write_text(json.dumps({'game': 'oot'}))
     options = mc / 'options.txt'
     lines = options.read_text().splitlines() if options.exists() else ['pauseOnLostFocus:false', 'tutorialStep:none', 'onboardAccessibility:false']
     key = 'file/Hyrule Items'
@@ -173,7 +185,7 @@ def sessions(c):
             # A rebuilt binary replaces the file a running game was started from.
             exe = Path(str((proc / 'exe').resolve()).removesuffix(' (deleted)'))
             cwd = (proc / 'cwd').resolve()
-            if exe == binary and cwd == Path(c['runtime']).resolve():
+            if exe == binary:
                 found[int(proc.name)] = 'Zelda'
             elif exe.name == 'java' and ('-Dcomposite.shm=' + c['shm']).encode() in args and cwd == mc:
                 found[int(proc.name)] = 'Minecraft'
@@ -238,11 +250,12 @@ def doctor(c):
     except RuntimeError:
         present = False
     check('Minecraft ' + VERSIONS['minecraft'] + ' client jar', present)
-    for name in (NATIVE, 'soh.o2r', 'oot.o2r'):
+    for name in (NATIVE, 'soh.o2r'):
         check('runtime/' + name, (Path(c['runtime']) / name).is_file())
     check('Prism instance', (instance(c) / 'mmc-pack.json').is_file())
     check('Fabric mod installed', (minecraft(c) / 'mods' / JAR).is_file())
-    check(WORLD + ' created', (minecraft(c) / 'saves' / WORLD / 'level.dat').is_file())
+    if not (Path(c['runtime']) / 'oot.o2r').is_file():
+        print('NOTE Ocarina of Time assets not extracted; only plain Minecraft worlds can be created (./hyrule extract ROM)')
     return ok
 
 
@@ -279,22 +292,14 @@ def start(c):
         marker.unlink(missing_ok=True)
     logs = ROOT / '.local/logs'
     logs.mkdir(parents=True, exist_ok=True)
-    with (logs / 'world.log').open('w') as log:
-        world = subprocess.Popen([str(Path(c['runtime']) / NATIVE)], cwd=c['runtime'], env=native_env(c),
-                                 stdout=log, stderr=log, start_new_session=True)
-    time.sleep(1)
-    if world.poll() is not None:
-        raise RuntimeError('Zelda exited; see .local/logs/world.log')
+    # Minecraft starts the game engine itself when a world made from that game is opened.
     with (logs / 'player.log').open('w') as log:
         player = subprocess.Popen([c['prism_command'], '--dir', c['prism_dir'], '--launch', c['instance']],
                                   stdout=log, stderr=log, start_new_session=True)
     time.sleep(1)
     if player.poll() not in (None, 0):
         raise RuntimeError('Prism exited with an error; see .local/logs/player.log')
-    if os.environ.get('HYPRLAND_INSTANCE_SIGNATURE') and shutil.which('hyprctl'):
-        with (logs / 'layout.log').open('w') as log:
-            subprocess.Popen([sys.executable, str(ROOT / 'tools/arrange.py'), '--wait'], stdout=log, stderr=log, start_new_session=True)
-    print('Started. Play in the "Minecraft x Ocarina of Time" window.')
+    print('Minecraft started. Open or create a world; an Ocarina of Time world starts Zelda with it.')
 
 
 def main():

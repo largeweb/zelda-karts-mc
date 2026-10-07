@@ -11,6 +11,19 @@ public final class Dev {
   catch(Exception e){return null;}
  }
  private static final Gson JSON=new Gson();
+ public static boolean enabled(){return ROOT!=null;}
+ /** One-shot instruction for the title screen, for testing world creation: startup.json. */
+ public static boolean startup(Minecraft mc,net.minecraft.client.gui.screens.Screen title){
+  try{
+   var file=ROOT.resolve("startup.json");
+   if(!Files.isRegularFile(file))return false;
+   var q=JsonParser.parseString(Files.readString(file)).getAsJsonObject();Files.delete(file);
+   if(q.has("screen"))net.minecraft.client.gui.screens.worldselection.CreateWorldScreen.openFresh(mc,()->mc.gui.setScreen(title));
+   else for(var game:Games.ALL)if(game.id().equals(q.get("game").getAsString()))
+    WorldCreator.create(mc,title,game,q.get("create").getAsString(),q.get("create").getAsString(),1,true);
+   return true;
+  }catch(Exception e){System.err.println("Dev startup: "+e);return true;}
+ }
  private static int ticks,useTicks,attackTicks,moveTicks;
  private static KeyMapping moveKey;
  private static void write(String file,JsonObject value)throws Exception{
