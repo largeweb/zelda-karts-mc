@@ -22,7 +22,8 @@
     "CreativeItemsMixin",
     "CommandsMixin",
     "BackupMixin",
-    "PipelineMixin"
+    "PipelineMixin",
+    "ExplosionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

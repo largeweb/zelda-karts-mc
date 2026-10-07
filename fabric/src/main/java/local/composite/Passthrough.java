@@ -89,7 +89,7 @@ public final class Passthrough {
   }
   Vec3 feet=player.position().subtract(origin(),BASE,0).scale(SCALE),eye=feet.add(0,player.getEyeHeight()*SCALE,0);
   FloorSupport.tick(mc,shm,epoch);
-  NativeBlocks.target(p);NativeCombat.tick(shm,epoch);
+  NativeBlocks.target(p);NativeCombat.tick(shm,epoch);ZeldaFire.tick(mc,shm,epoch);
   wasGrounded=player.onGround();
   // Native Minecraft renders/mines every block; only nearby full cubes are mirrored
   // into Zelda for native arrows/actors. Partial shapes use vanilla player collision.

@@ -25,6 +25,8 @@ extern "C" {
 #include "functions.h"
 #include "variables.h"
 #include "overlays/actors/ovl_En_Arrow/z_en_arrow.h"
+#include "overlays/actors/ovl_En_Bom/z_en_bom.h"
+#include "overlays/actors/ovl_Magic_Fire/z_magic_fire.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
 extern SaveContext gSaveContext;
 extern PlayState* gPlayState;
@@ -37,7 +39,7 @@ namespace {
 using namespace composite;
 
 // Offsets beyond Protocol.h's legacy layout; mirrored by the Fabric mod.
-constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,
+constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,
               COMBAT = 1408, FLOOR = 1536, ENEMIES = 1888;
 constexpr uint32_t FLAG_ACTIVE = 1, FLAG_DIALOGUE = 2, FLAG_PAUSE = 4, FLAG_SCRIPTED = 8, FLAG_INSTRUMENT = 16, FLAG_AIMING = 32;
 // Control bits published by Minecraft.
@@ -276,8 +278,32 @@ void publishFloor() {
     write(shared, FLOOR, f);
 }
 
+// Zelda fire and explosions that Minecraft should react to (igniting TNT): fire arrows
+// in flight, Din's Fire and exploding bombs. Each is a swept sphere from its previous
+// position to its current one, so a fast arrow cannot skip over a block between frames.
+void publishFire() {
+    if (!live() || !world()) return;
+    struct Source { float x, y, z, px, py, pz, radius; };
+    struct Sources { uint32_t epoch, count; Source entries[3]; } out{};
+    static_assert(sizeof(Sources) == 92);
+    out.epoch = port.epoch;
+    auto add = [&](Actor* a, float radius) {
+        if (out.count < 3)
+            out.entries[out.count++] = { a->world.pos.x, a->world.pos.y, a->world.pos.z, a->prevPos.x, a->prevPos.y, a->prevPos.z, radius };
+    };
+    for (auto* a = gPlayState->actorCtx.actorLists[ACTORCAT_ITEMACTION].head; a; a = a->next) {
+        if (!a->update) continue;
+        if (a->id == ACTOR_EN_ARROW && a->params == ARROW_FIRE && !a->parent) add(a, 30);
+        if (a->id == ACTOR_MAGIC_FIRE) add(a, std::max(40.0f, (float)((MagicFire*)a)->collider.dim.radius));
+    }
+    for (auto* a = gPlayState->actorCtx.actorLists[ACTORCAT_EXPLOSIVE].head; a; a = a->next)
+        if (a->update && a->id == ACTOR_EN_BOM && a->params == BOMB_EXPLOSION) add(a, 100);
+    write(shared, FIRE, out);
+}
+
 // Minecraft weapons hitting Zelda actors.
 ColliderCylinder swordColliders[3]{};
+ColliderCylinder blastCollider{};
 bool swordReady = false;
 void combat() {
     if (!live() || !world()) return;
@@ -290,11 +316,44 @@ void combat() {
         }
         if (hit) release(shared + 1480, acquire(shared + 1480) + 1);
     }
+    if (!swordReady) {
+        static ColliderCylinderInit sword = {
+            { COLTYPE_HIT0, AT_ON | AT_TYPE_PLAYER, AC_NONE, OC1_NONE, OC2_NONE, COLSHAPE_CYLINDER },
+            { ELEMTYPE_UNK0, { DMG_SLASH_MASTER, 0, 1 }, { 0, 0, 0 }, TOUCH_ON | TOUCH_SFX_NORMAL, BUMP_NONE, OCELEM_NONE },
+            { 22, 56, 0, { 0, 0, 0 } },
+        };
+        static ColliderCylinderInit blast = {
+            { COLTYPE_HIT0, AT_ON | AT_TYPE_PLAYER, AC_NONE, OC1_NONE, OC2_NONE, COLSHAPE_CYLINDER },
+            { ELEMTYPE_UNK0, { DMG_EXPLOSIVE, 0, 2 }, { 0, 0, 0 }, TOUCH_ON | TOUCH_SFX_NONE, BUMP_NONE, OCELEM_NONE },
+            { 100, 200, 0, { 0, 0, 0 } },
+        };
+        for (auto& collider : swordColliders) {
+            Collider_InitCylinder(gPlayState, &collider);
+            Collider_SetCylinder(gPlayState, &collider, actor, &sword);
+        }
+        Collider_InitCylinder(gPlayState, &blastCollider);
+        Collider_SetCylinder(gPlayState, &blastCollider, actor, &blast);
+        swordReady = true;
+    }
     CombatEvent e{};
     if (!read(shared, COMBAT, e) || e.epoch != port.epoch || e.sequence == lastCombat) return;
     lastCombat = e.sequence;
     release(shared + 1472, e.sequence);
-    if (!cameraFree() || !finite({ e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power })) return;
+    if (!finite({ e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power })) return;
+    if (e.kind == 4) {
+        // A Minecraft explosion (TNT, creeper): one frame of bomb damage around its centre.
+        if (!swordReady || e.power < 1) return;
+        float radius = std::min(e.power, 600.0f);
+        blastCollider.dim.radius = (s16)radius;
+        blastCollider.dim.height = (s16)(radius * 2);
+        blastCollider.dim.yShift = 0;
+        blastCollider.dim.pos = { (s16)e.x, (s16)(e.y - radius), (s16)e.z };
+        blastCollider.base.atFlags = AT_ON | AT_TYPE_PLAYER;
+        blastCollider.info.toucherFlags &= ~TOUCH_HIT;
+        CollisionCheck_SetAT(gPlayState, &gPlayState->colChkCtx, &blastCollider.base);
+        return;
+    }
+    if (!cameraFree()) return;
     if (std::abs(e.x - mc.x) > 100 || std::abs(e.y - mc.y) > 100 || std::abs(e.z - mc.z) > 100) return;
     if (e.kind == 3) {
         float magnitude = std::sqrt(e.dx * e.dx + e.dy * e.dy + e.dz * e.dz);
@@ -312,18 +371,6 @@ void combat() {
             Player_PlaySfx(actor, NA_SE_IT_ARROW_SHOT);
         }
     } else if (e.kind == 1 || e.kind == 2) {
-        if (!swordReady) {
-            static ColliderCylinderInit init = {
-                { COLTYPE_HIT0, AT_ON | AT_TYPE_PLAYER, AC_NONE, OC1_NONE, OC2_NONE, COLSHAPE_CYLINDER },
-                { ELEMTYPE_UNK0, { DMG_SLASH_MASTER, 0, 1 }, { 0, 0, 0 }, TOUCH_ON | TOUCH_SFX_NORMAL, BUMP_NONE, OCELEM_NONE },
-                { 22, 56, 0, { 0, 0, 0 } },
-            };
-            for (auto& sword : swordColliders) {
-                Collider_InitCylinder(gPlayState, &sword);
-                Collider_SetCylinder(gPlayState, &sword, actor, &init);
-            }
-            swordReady = true;
-        }
         // Overlapping samples cover the full reach; Zelda takes the maximum, not the sum.
         Vec3f from{ e.x, e.y, e.z }, to{ e.x + e.dx * 110, e.y + e.dy * 110, e.z + e.dz * 110 }, hit{};
         float reach = 85;
@@ -515,6 +562,7 @@ void pump() {
     release(shared + 20, gSaveContext.gameMode);
     publishFloor();
     publishEnemies();
+    publishFire();
     port.frame++;
     write(shared, PORT, port);
 }

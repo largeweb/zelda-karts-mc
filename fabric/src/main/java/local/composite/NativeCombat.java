@@ -24,6 +24,12 @@ public final class NativeCombat {
   if(events.size()>=16)return;
   events.add(new Event(3,arrow.position(),arrow.getDeltaMovement(),1));arrow.discard();
  }
+ /** A Minecraft explosion in Hyrule also hurts Zelda actors, as a bomb would. */
+ public static void explosion(net.minecraft.world.level.ServerExplosion explosion){
+  if(!Passthrough.active()||!explosion.level().dimension().equals(NativeBlocks.DIMENSION)||events.size()>=16)return;
+  // Vanilla damages entities out to twice the explosion's power; 40 Zelda units per block.
+  events.add(new Event(4,explosion.center(),Vec3.ZERO,explosion.radius()*2*40));
+ }
  public static void tick(Shared shm,int epoch){
   if(epoch!=lastEpoch){events.clear();pending=0;lastEpoch=epoch;}
   if(pending!=0&&shm.get(1472)!=pending)return;
