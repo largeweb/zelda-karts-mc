@@ -38,6 +38,8 @@ public final class Digging {
  // the cell is, and for a cell with a floor through it how high that floor sits.
  private static final int DEPTH=0xff,MATERIAL_SHIFT=8,KIND_SHIFT=16,KIND=3<<KIND_SHIFT,HEIGHT_SHIFT=18;
  private static final int FILLED=0,CARVED=1<<KIND_SHIFT,OPEN=2<<KIND_SHIFT,SURFACE=3<<KIND_SHIFT;
+ // Set on a dug cell that held generated soil or stone rather than Zelda scenery.
+ private static final int WAS_FILLED=1<<26;
  private static final Map<Long,Integer> cells=new ConcurrentHashMap<>();
  private static final int MAP=64,LAYERS=24,DEPTH_STONE=4,DEPTH_BEDROCK=24;
  private static final int HIT=4608,CLASSIFY_REQUEST=4672,CLASSIFY_REPLY=4928,CLASSIFY_MAX=16;
@@ -202,7 +204,7 @@ public final class Digging {
  private static void carve(BlockPos pos,int depth,int material){
   Integer old=cells.get(pos.asLong());
   if(old!=null&&(old&DEPTH)!=0){depth=old&DEPTH;material=(old>>MATERIAL_SHIFT)&0xff;}
-  cells.put(pos.asLong(),depth|material<<MATERIAL_SHIFT|CARVED);
+  cells.put(pos.asLong(),depth|material<<MATERIAL_SHIFT|CARVED|(kind(old)==FILLED?WAS_FILLED:0));
   mapDirty=true;gridDirty=true;dirty=true;
   for(var direction:Direction.values()){
    var next=pos.relative(direction);
@@ -254,6 +256,33 @@ public final class Digging {
   if(++serial==0)serial=1;
   asked=batch;askedTicks=0;
   shm.set(CLASSIFY_REQUEST,serial);
+ }
+
+ /**
+  * Using a hoe on a block placed in a dug cell puts back what was dug there: Zelda's
+  * scenery where the cell held scenery, or the soil or stone that was generated for it.
+  * The placed block comes back as an item. Returns true if the click was a restore.
+  */
+ public static boolean restore(Minecraft mc){
+  if(!Passthrough.interactive()||!NativeBlocks.inDimension()||mc.player==null||!mc.player.getMainHandItem().is(net.minecraft.tags.ItemTags.HOES))return false;
+  if(!(mc.hitResult instanceof BlockHitResult hit)||hit.getType()!=HitResult.Type.BLOCK)return false;
+  var pos=hit.getBlockPos().immutable();Integer cell=cells.get(pos.asLong());
+  if(kind(cell)!=CARVED)return false;
+  var server=mc.getSingleplayerServer();boolean drops=!mc.player.getAbilities().instabuild;
+  int depth=cell&DEPTH,material=(cell>>MATERIAL_SHIFT)&0xff;boolean soil=(cell&WAS_FILLED)!=0;
+  // The cell stops being dug first, so removing the placed block is not taken for digging.
+  if(soil)cells.put(pos.asLong(),depth|material<<MATERIAL_SHIFT);else cells.remove(pos.asLong());
+  mapDirty=true;gridDirty=true;dirty=true;
+  mc.player.swing(InteractionHand.MAIN_HAND,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+  server.execute(()->{
+   var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
+   var placed=level.getBlockState(pos);
+   if(drops)Block.dropResources(placed,level,pos);
+   var original=depth>=DEPTH_BEDROCK?Blocks.BEDROCK:depth>=DEPTH_STONE?Blocks.STONE:subsoil(material);
+   level.setBlock(pos,(soil?original:Blocks.AIR).defaultBlockState(),3);
+   level.levelEvent(2001,pos,Block.getId(soil?original.defaultBlockState():placed));
+  });
+  return true;
  }
 
  // --- server: block changes -------------------------------------------------------

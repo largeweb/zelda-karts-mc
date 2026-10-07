@@ -76,6 +76,7 @@ Without the extract step only plain Minecraft worlds can be created.
 | Left Alt | Z-target |
 | Tab | Zelda pause screen (map, quest status) |
 | `/link child`, `/link adult` | Switch Link's age |
+| `/help`, `/help 2` … | In-game guide |
 
 Zelda items are in Creative → Tools & Utilities, or search by name. Holding one
 is enough to use it. In Creative, magic and ammunition do not run out.
@@ -101,6 +102,12 @@ material (grass, sand, stone, wood), leaving a block-sized opening. Behind it is
 soil for a few blocks, then stone, with bedrock 24 blocks in. Dug space is always
 lined with blocks. Water, lava, doors and moving platforms cannot be dug. What
 has been dug is saved with the Minecraft world in `hyrule-digging.dat`.
+
+To put a dug spot back, place any block in it and right-click that block with a
+hoe. The block is returned and the spot becomes what it was: Zelda's original
+scenery, or the soil or stone that was behind it.
+
+In game, `/help` and `/help 2` … `/help 8` page through a guide to all of this.
 
 ## Known gaps
 

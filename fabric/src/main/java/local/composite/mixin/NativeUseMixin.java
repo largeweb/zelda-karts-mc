@@ -9,7 +9,7 @@ public class NativeUseMixin {
  @Inject(method="pick",at=@At("TAIL"))
  private void composite$pick(CallbackInfo ci){FloorSupport.hidePick((Minecraft)(Object)this);}
  @Inject(method="startUseItem",at=@At("HEAD"),cancellable=true)
- private void composite$use(CallbackInfo ci){if(NativeButtons.click((Minecraft)(Object)this,false)||(Passthrough.active()&&!Passthrough.interactive())||ZeldaItems.holding((Minecraft)(Object)this)||NativeBlocks.useGround((Minecraft)(Object)this))ci.cancel();}
+ private void composite$use(CallbackInfo ci){if(Passthrough.restoreScenery((Minecraft)(Object)this)||NativeButtons.click((Minecraft)(Object)this,false)||(Passthrough.active()&&!Passthrough.interactive())||ZeldaItems.holding((Minecraft)(Object)this)||NativeBlocks.useGround((Minecraft)(Object)this))ci.cancel();}
  @Inject(method="startAttack",at=@At("HEAD"),cancellable=true)
  private void composite$emptyAttack(CallbackInfoReturnable<Boolean> ci){if(NativeButtons.click((Minecraft)(Object)this,true)||ZeldaItems.holding((Minecraft)(Object)this))ci.setReturnValue(false);}
  @Inject(method="continueAttack",at=@At("HEAD"),cancellable=true)

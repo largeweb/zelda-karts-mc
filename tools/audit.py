@@ -5,13 +5,13 @@ import re,subprocess,sys
 root=Path(__file__).resolve().parents[1]
 files=subprocess.check_output(['git','-C',str(root),'ls-files','--stage','-z']).split(b'\0')
 errors=[];count=0
-allowed_suffix={'.py','.java','.cpp','.h','.json','.md','.txt','.patch','.sh'}
+allowed_suffix={'.py','.java','.cpp','.h','.json','.md','.txt','.patch','.sh','.fsh','.vsh'}
 for entry in files:
     if not entry:continue
     meta,name=entry.split(b'\t',1);path=name.decode();count+=1
     mode,oid,stage=meta.decode().split()
     if stage!='0' or mode not in ('100644','100755'):errors.append(path+': non-regular file or unresolved entry');continue
-    if path not in ('composite','.gitignore','.gitattributes','LICENSE') and Path(path).suffix not in allowed_suffix:
+    if path not in ('hyrule','.gitignore','.gitattributes','LICENSE') and Path(path).suffix not in allowed_suffix:
         errors.append(path+': unexpected file type')
     if any(part in ('.local','build','logs','saves','backups','sessions','libraries') for part in Path(path).parts) or Path(path).name in ('local.json','instance.cfg','accounts.json','DirtTexture.h'):
         errors.append(path+': private/generated path')

@@ -42,6 +42,7 @@ public final class Passthrough {
  static void calmWeather(net.minecraft.server.MinecraftServer server){
   server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(),"execute in composite:zelda run weather clear 1000000");
  }
+ public static boolean restoreScenery(Minecraft mc){return Digging.restore(mc);}
  public static boolean interactive(){return active()&&!locked;}
  public static boolean active(){return ENABLED&&attached&&System.nanoTime()-heartbeat<1_000_000_000L;}
  static ByteBuffer buffer(int n){return ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN);}

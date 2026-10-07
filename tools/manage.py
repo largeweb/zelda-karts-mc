@@ -307,7 +307,7 @@ def start(c):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='cmd', required=True)
-    for name in ('fetch-source', 'build-fabric', 'assets', 'setup', 'install', 'doctor', 'start', 'stop', 'restart', 'status', 'arrange', 'save-patch'):
+    for name in ('fetch-source', 'build-fabric', 'assets', 'setup', 'install', 'doctor', 'start', 'stop', 'restart', 'status', 'arrange', 'save-patch', 'audit'):
         sub.add_parser(name)
     b = sub.add_parser('build')
     b.add_argument('--jobs', type=int, default=min(16, os.cpu_count() or 2))
@@ -337,6 +337,8 @@ def main():
             print(kind + ':', pid)
         if not found:
             print('Stopped')
+    elif a.cmd == 'audit':
+        run([sys.executable, ROOT / 'tools/audit.py'])
     elif a.cmd == 'arrange':
         run([sys.executable, ROOT / 'tools/arrange.py'])
     elif a.cmd == 'save-patch':

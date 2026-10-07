@@ -52,7 +52,7 @@ public final class Bridge {
                 player.setPos(baseX+p.getFloat(20)/SCALE,Y+p.getFloat(24)/SCALE,baseZ+p.getFloat(28)/SCALE);
                 player.setOnGround(true);yaw=0;pitch=15;
                 lastMouseX=p.getInt(12);lastMouseY=p.getInt(16);lastButtons=0;
-                LOG.info("Minecraft LocalPlayer attached to Clock Town, epoch {}",epoch);
+                LOG.info("Minecraft player attached to the game bridge",epoch);
             }
             mc.options.pauseOnLostFocus=false;
             // Minecraft's title/world selection remains available until F8 in 2ship.
