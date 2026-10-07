@@ -855,6 +855,12 @@ extern "C" bool CompositePollCollision() {
     service();
     return true;
 }
+// Experimental: with COMPOSITE_GUEST set, this game draws only Link and its actors, so
+// its picture can be laid over another game's world.
+extern "C" int CompositeGuest() {
+    static const bool guest = std::getenv("COMPOSITE_GUEST") != nullptr;
+    return guest;
+}
 extern "C" int CompositeOcarinaInput(u16* pad) {
     const auto snapshot = instrumentInput.load(std::memory_order_acquire);
     if (!snapshot) return 0;

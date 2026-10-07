@@ -123,18 +123,19 @@ index 524ecd89f..c0b6db227 100644
      static s16 magicArrowEffectsG[] = { 0, 100, 255 };
      static s16 magicArrowEffectsB[] = { 0, 255, 100 };
 diff --git i/soh/src/code/z_play.c w/soh/src/code/z_play.c
-index 729edd0e2..ffc8c4567 100644
+index 729edd0e2..fd65c6013 100644
 --- i/soh/src/code/z_play.c
 +++ w/soh/src/code/z_play.c
-@@ -651,6 +651,7 @@ void Play_Init(GameState* thisx) {
+@@ -651,6 +651,8 @@ void Play_Init(GameState* thisx) {
  #endif
  }
  
 +extern void CompositeCamera(Camera* camera);
++extern int CompositeGuest(void);
  void Play_Update(PlayState* play) {
      Input* input = play->state.input;
      s32 isPaused;
-@@ -1275,6 +1276,7 @@ skip:
+@@ -1275,6 +1277,7 @@ skip:
          }
  
          Camera_Update(play->cameraPtrs[play->nextCamera]);
@@ -142,10 +143,20 @@ index 729edd0e2..ffc8c4567 100644
  
          PLAY_LOG(3814);
      }
-@@ -1498,6 +1500,8 @@ void Play_Draw(PlayState* play) {
-                 Scene_Draw(play);
-                 Room_Draw(play, &play->roomCtx.curRoom, roomDrawFlags & 3);
-                 Room_Draw(play, &play->roomCtx.prevRoom, roomDrawFlags & 3);
+@@ -1495,9 +1498,15 @@ void Play_Draw(PlayState* play) {
+                 } else {
+                     roomDrawFlags = HREG(84);
+                 }
+-                Scene_Draw(play);
+-                Room_Draw(play, &play->roomCtx.curRoom, roomDrawFlags & 3);
+-                Room_Draw(play, &play->roomCtx.prevRoom, roomDrawFlags & 3);
++                // Composite bridge: as a guest in another game's world, only Link and
++                // other actors are drawn, not this scene.
++                if (!CompositeGuest()) {
++                    Scene_Draw(play);
++                    Room_Draw(play, &play->roomCtx.curRoom, roomDrawFlags & 3);
++                    Room_Draw(play, &play->roomCtx.prevRoom, roomDrawFlags & 3);
++                }
 +                // Composite bridge: marks the end of scene geometry (see CompositeSceneDrawn).
 +                gDPNoOpTag3(POLY_OPA_DISP++, 0x43, NULL, 0);
              }
