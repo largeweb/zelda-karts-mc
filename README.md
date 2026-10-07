@@ -81,11 +81,12 @@ the experience bar shows magic. Creative mode takes no damage.
 
 ## Digging
 
-Hit bare Zelda ground while holding any Minecraft item and that spot becomes a
-block: grass, sand, stone or planks depending on the floor. Mine it and keep
-going: dirt for a few blocks, then stone, bedrock 24 down. Holes are always lined
-with blocks. Only floors can be dug, not walls, water or lava. What has been dug
-is saved with the Minecraft world in `hyrule-digging.dat`.
+Hold attack on Zelda scenery, floor or wall, while holding any Minecraft item.
+Minecraft's cracks appear on the Zelda surface and it breaks like a block of that
+material (grass, sand, stone, wood), leaving a block-sized opening. Behind it is
+soil for a few blocks, then stone, with bedrock 24 blocks in. Dug space is always
+lined with blocks. Water, lava, doors and moving platforms cannot be dug. What
+has been dug is saved with the Minecraft world in `hyrule-digging.dat`.
 
 ## Known gaps
 

@@ -66,7 +66,7 @@ public final class WorldFrame {
   * as sixteen floats in a one-row texture (no uniform buffer needed).
   */
  private static void carveInputs(com.mojang.renderpearl.api.commands.CommandEncoder encoder){
-  if(carve==null){carve=new TextureTarget("Dug floor columns",64,64,GpuFormat.R32_FLOAT,null);params=new TextureTarget("Zelda frame camera",PARAMS,1,GpuFormat.R32_FLOAT,null);}
+  if(carve==null){carve=new TextureTarget("Dug cells",64,64,GpuFormat.R32_FLOAT,null);params=new TextureTarget("Zelda frame camera",PARAMS,1,GpuFormat.R32_FLOAT,null);}
   var mc=Minecraft.getInstance();
   var grid=mc.player==null?null:Digging.mapIfChanged(mc.player.blockPosition());
   if(grid!=null)encoder.writeToTexture(carve.getColorTexture(),grid,0,0,0,0,64,64);
@@ -82,8 +82,7 @@ public final class WorldFrame {
     rx,0,rz,(float)tan, ux,uy,uz,NEAR, fx,fy,fz,far});
    // The Zelda surface being mined, for the crack overlay: column, floor height, on/off.
    var mining=Digging.mining();
-   if(mining!=null)f.put(new float[]{mining.getX()-Digging.mapX(),mining.getZ()-Digging.mapZ(),Digging.miningHeight(),1,0,0,0,0});
-   else f.put(new float[8]);
+   f.put(new float[]{mining==null?0:mining.getX()-Digging.mapX(),mining==null?0:mining.getY()-Digging.mapY(),mining==null?0:mining.getZ()-Digging.mapZ(),mining==null?0:1,Digging.mapY(),0,0,0});
   }else for(int i=0;i<PARAMS;i++)f.put(0);
   encoder.writeToTexture(params.getColorTexture(),paramBytes,0,0,0,0,PARAMS,1);
  }

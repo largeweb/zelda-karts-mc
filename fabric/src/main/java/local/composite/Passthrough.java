@@ -38,6 +38,10 @@ public final class Passthrough {
  public static boolean aiming(){return active()&&aiming;}
  /** Tells Zelda the far plane Minecraft renders with, so exported depth matches Minecraft's. */
  public static void depthFar(float far){WorldFrame.far=far;if(shared!=null)shared.f(60,far);}
+ /** Hyrule has its own sky; Minecraft rain and snow would also settle on blocks lining dug ground. */
+ static void calmWeather(net.minecraft.server.MinecraftServer server){
+  server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(),"execute in composite:zelda run weather clear 1000000");
+ }
  public static boolean interactive(){return active()&&!locked;}
  public static boolean active(){return ENABLED&&attached&&System.nanoTime()-heartbeat<1_000_000_000L;}
  static ByteBuffer buffer(int n){return ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN);}
@@ -54,7 +58,7 @@ public final class Passthrough {
    player.setDeltaMovement(Vec3.ZERO);player.setOnGround(true);
    player.setYRot(state.getFloat(4));player.setXRot(15);
    var pos=player.position();var uuid=player.getUUID();
-   server.execute(()->{server.setWorldAllowCommands(true);var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null){var dimension=server.getLevel(NativeBlocks.DIMENSION);if(dimension!=null)sp.teleportTo(dimension,pos.x,pos.y,pos.z,Set.of(),player.getYRot(),player.getXRot(),false);else sp.sendSystemMessage(net.minecraft.network.chat.Component.literal("Hyrule dimension missing: recreate the world with ./hyrule setup."));server.getPlayerList().sendPlayerPermissionLevel(sp);server.getCommands().sendCommands(sp);}});
+   server.execute(()->{server.setWorldAllowCommands(true);Passthrough.calmWeather(server);var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null){var dimension=server.getLevel(NativeBlocks.DIMENSION);if(dimension!=null)sp.teleportTo(dimension,pos.x,pos.y,pos.z,Set.of(),player.getYRot(),player.getXRot(),false);else sp.sendSystemMessage(net.minecraft.network.chat.Component.literal("Hyrule dimension missing: recreate the world with ./hyrule setup."));server.getPlayerList().sendPlayerPermissionLevel(sp);server.getCommands().sendCommands(sp);}});
   }
   NativeAvatar.tick(mc,shm,epoch,state);
   if(locked){player.setPos(p.getFloat(20)/SCALE+origin(),BASE+p.getFloat(24)/SCALE,p.getFloat(28)/SCALE);player.setDeltaMovement(Vec3.ZERO);}

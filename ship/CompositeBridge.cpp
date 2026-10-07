@@ -41,10 +41,13 @@ using namespace composite;
 // Offsets beyond Protocol.h's legacy layout; mirrored by the Fabric mod.
 constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,
               COMBAT = 1408, FLOOR = 1536, ENEMIES = 1888;
-// Header fields written by Minecraft for dug floors: how to treat the player, and how far
-// above the player to start sampling Zelda floors when the player is below the surface.
-constexpr int DIG_MODE = 8, DIG_MATERIAL = 12, DIG_LIFT = 16, WIDE_FLOOR = 2048, WIDE_SIDE = 25;
-constexpr uint32_t DIG_OVER_HOLE = 1, DIG_UNDERGROUND = 2;
+// Digging. Minecraft tells Zelda which of its collision to ignore around the player
+// (bits at DIG_MODE) because dug-out space is bounded by Minecraft blocks instead.
+// Zelda tells Minecraft what the crosshair hits (DIG_HIT) and answers questions about
+// whether cells are open air, solid, or have scenery passing through them (CLASSIFY).
+constexpr int DIG_MODE = 8, DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CLASSIFY_MAX = 16;
+constexpr uint32_t DIG_NO_FLOOR = 1, DIG_NO_WALLS = 2, DIG_NO_CEILING = 4;
+enum CellClass : uint8_t { CELL_OPEN = 0, CELL_SOLID = 1, CELL_SURFACE = 2 };
 constexpr uint32_t FLAG_ACTIVE = 1, FLAG_DIALOGUE = 2, FLAG_PAUSE = 4, FLAG_SCRIPTED = 8, FLAG_INSTRUMENT = 16, FLAG_AIMING = 32;
 // Control bits published by Minecraft.
 constexpr uint32_t KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_JUMP = 16, KEY_ATTACK = 32,
@@ -149,7 +152,7 @@ Reply collide(const Request& r) {
     // Where the player has dug into the floor, Minecraft's blocks take over from
     // Zelda's collision: over a hole there is no Zelda floor, and underground none at all.
     const uint32_t dug = acquire(shared + DIG_MODE);
-    if (dug == DIG_UNDERGROUND) return { r.dx, r.dy, r.dz };
+    if (dug == (DIG_NO_FLOOR | DIG_NO_WALLS | DIG_NO_CEILING)) return { r.dx, r.dy, r.dz };
     auto* actor = &link()->actor;
     float height = bodyHeight(), radius = bodyRadius();
     float requested;
@@ -162,14 +165,16 @@ Reply collide(const Request& r) {
         Vec3f next{ cur.x + r.dx / steps, cur.y + r.dy / steps, cur.z + r.dz / steps }, out = next;
         CollisionPoly* wall = nullptr;
         s32 bg = 0;
-        BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &out, &next, &cur, radius, &wall, &bg, actor,
-                                 std::min(26.8f, height - 2.0f));
-        // Test near the head too, so low archways cannot be walked through upright.
-        float headOffset = std::max(0.0f, height - 20);
-        Vec3f oldHead{ cur.x, cur.y + headOffset, cur.z }, newHead{ out.x, out.y + headOffset, out.z }, head = newHead;
-        BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &head, &newHead, &oldHead, radius, &wall, &bg, actor, 20.0f);
-        out.x = head.x;
-        out.z = head.z;
+        if (!(dug & DIG_NO_WALLS)) {
+            BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &out, &next, &cur, radius, &wall, &bg, actor,
+                                     std::min(26.8f, height - 2.0f));
+            // Test near the head too, so low archways cannot be walked through upright.
+            float headOffset = std::max(0.0f, height - 20);
+            Vec3f oldHead{ cur.x, cur.y + headOffset, cur.z }, newHead{ out.x, out.y + headOffset, out.z }, head = newHead;
+            BgCheck_EntitySphVsWall3(&gPlayState->colCtx, &head, &newHead, &oldHead, radius, &wall, &bg, actor, 20.0f);
+            out.x = head.x;
+            out.z = head.z;
+        }
         float floorY = -32000;
         for (auto offset : { Vec3f{ 0, 0, 0 }, Vec3f{ 9, 0, 9 }, Vec3f{ -9, 0, 9 }, Vec3f{ 9, 0, -9 }, Vec3f{ -9, 0, -9 } }) {
             Vec3f ray{ out.x + offset.x, std::max(cur.y, out.y) + 24, out.z + offset.z };
@@ -177,16 +182,83 @@ Reply collide(const Request& r) {
             float h = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, actor, &ray);
             if (h <= cur.y + 24.01f) floorY = std::max(floorY, h);
         }
-        if (dug == DIG_OVER_HOLE) floorY = -32000;
+        if (dug & DIG_NO_FLOOR) floorY = -32000;
         if (out.y < floorY && r.dy <= 0) out.y = floorY;
         float ceilingY = out.y;
         CollisionPoly* ceiling = nullptr;
-        if (BgCheck_EntityCheckCeiling(&gPlayState->colCtx, &ceilingY, &out, height, &ceiling, &bg, actor))
+        if (!(dug & DIG_NO_CEILING) && BgCheck_EntityCheckCeiling(&gPlayState->colCtx, &ceilingY, &out, height, &ceiling, &bg, actor))
             out.y = std::min(out.y, ceilingY);
-        if (floorY < -31000 && out.y < cur.y - 20 && dug != DIG_OVER_HOLE) return { 0, 0, 0 };
+        if (floorY < -31000 && out.y < cur.y - 20 && !(dug & DIG_NO_FLOOR)) return { 0, 0, 0 };
         cur = out;
     }
     return { cur.x - r.x, cur.y - r.y, cur.z - r.z };
+}
+
+// What the crosshair rests on in Zelda's scenery, floor or wall, for mining it.
+void publishDigHit() {
+    struct Hit { uint32_t epoch, valid; float x, y, z, nx, ny, nz; uint32_t material; } out{};
+    out.epoch = port.epoch;
+    if (live() && world()) {
+        {
+            float yaw = mc.yaw * DEGREES, pitch = mc.pitch * DEGREES;
+            Vec3f eye{ mc.x, mc.y + avatarEye(), mc.z };
+            Vec3f end{ eye.x - std::sin(yaw) * std::cos(pitch) * 220, eye.y - std::sin(pitch) * 220,
+                       eye.z + std::cos(yaw) * std::cos(pitch) * 220 };
+            Vec3f hit{};
+            CollisionPoly* poly = nullptr;
+            s32 bg = 0;
+            CubeQueryGuard cubes;
+            // Only the scene itself can be dug, not doors, platforms and other moving pieces.
+            if (BgCheck_EntityLineTest1(&gPlayState->colCtx, &eye, &end, &hit, &poly, true, true, true, true, &bg) && poly &&
+                bg == BGCHECK_SCENE) {
+                out = { port.epoch, 1, hit.x, hit.y, hit.z, poly->normal.x / 32767.0f, poly->normal.y / 32767.0f,
+                        poly->normal.z / 32767.0f, func_80041F10(&gPlayState->colCtx, poly, bg) };
+            }
+        }
+    }
+    write(shared, DIG_HIT, out);
+}
+
+// Is a block cell open air, solid, or crossed by scenery? Minecraft lines dug space
+// with blocks only where the answer is solid. Scenery is a hollow shell, so "solid"
+// means no surface runs through the cell and there is no floor anywhere beneath it.
+CellClass classify(int cx, int cy, int cz) {
+    const float half = SCALE / 2, reach = half - 1;
+    Vec3f centre{ cx * SCALE + half, cy * SCALE + half, cz * SCALE + half };
+    static const Vec3f axes[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+    for (auto& axis : axes) {
+        Vec3f a{ centre.x - axis.x * reach, centre.y - axis.y * reach, centre.z - axis.z * reach };
+        Vec3f b{ centre.x + axis.x * reach, centre.y + axis.y * reach, centre.z + axis.z * reach };
+        Vec3f hit{};
+        CollisionPoly* poly = nullptr;
+        s32 bg = 0;
+        // Surfaces are one-sided, so look along each axis in both directions.
+        if (BgCheck_EntityLineTest1(&gPlayState->colCtx, &a, &b, &hit, &poly, true, true, true, true, &bg) ||
+            BgCheck_EntityLineTest1(&gPlayState->colCtx, &b, &a, &hit, &poly, true, true, true, true, &bg))
+            return CELL_SURFACE;
+    }
+    CollisionPoly* floor = nullptr;
+    s32 bg = 0;
+    return BgCheck_EntityRaycastFloor3(&gPlayState->colCtx, &floor, &bg, &centre) > -31000 ? CELL_OPEN : CELL_SOLID;
+}
+void serviceClassify() {
+    if (!world()) return;
+    auto serial = acquire(shared + CLASSIFY_REQUEST);
+    if (serial == acquire(shared + CLASSIFY_REPLY)) return;
+    struct Request { uint32_t epoch, count; int32_t cells[CLASSIFY_MAX][3]; } request;
+    std::memcpy(&request, shared + CLASSIFY_REQUEST + 4, sizeof(request));
+    if (serial != acquire(shared + CLASSIFY_REQUEST)) return;
+    uint8_t classes[CLASSIFY_MAX]{};
+    if (request.epoch == port.epoch && request.count <= CLASSIFY_MAX) {
+        CubeQueryGuard cubes;
+        for (uint32_t i = 0; i < request.count; i++) {
+            auto& c = request.cells[i];
+            bool sane = std::abs(c[0]) < 2000 && std::abs(c[1]) < 2000 && std::abs(c[2]) < 2000;
+            classes[i] = sane ? classify(c[0], c[1], c[2]) : CELL_OPEN;
+        }
+    }
+    std::memcpy(shared + CLASSIFY_REPLY + 4, classes, sizeof(classes));
+    release(shared + CLASSIFY_REPLY, serial);
 }
 
 // Pull Minecraft's third-person camera out of Zelda walls.
@@ -216,6 +288,7 @@ void serviceCamera() {
 }
 void service() {
     serviceCamera();
+    serviceClassify();
     auto serial = acquire(shared + REQUEST);
     if (serial == lastReply) return;
     Request r{};
@@ -246,7 +319,6 @@ void target() {
     float y = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, &link()->actor, &ray);
     // The floor under the cell's centre may sit well above or below the aimed-at point on a slope.
     if (y < -31000 || std::abs(y - hit.y) > 45) return;
-    release(shared + DIG_MATERIAL, func_80041F10(&gPlayState->colCtx, floor, bg));
     port.target = 1;
     port.tx = x;
     port.ty = y;
@@ -279,39 +351,18 @@ void publishFloor() {
     f.epoch = port.epoch;
     f.x = (int)std::floor(mc.x / 40) - 4;
     f.z = (int)std::floor(mc.z / 40) - 4;
-    float lift;
-    std::memcpy(&lift, shared + DIG_LIFT, 4);
-    if (!std::isfinite(lift) || lift < 0 || lift > 2000) lift = 0;
+    // Sample from standing height: a jump must not lift the rays above a ledge and
+    // report its top as the floor.
+    static float standingY = 0;
+    if (mc.grounded || std::abs(mc.y - standingY) > 400) standingY = mc.y;
     for (int i = 0; i < 81; i++) {
-        Vec3f ray{ (f.x + i % 9) * 40.0f + 20, mc.y + 80 + lift, (f.z + i / 9) * 40.0f + 20 };
+        Vec3f ray{ (f.x + i % 9) * 40.0f + 20, standingY + 80, (f.z + i / 9) * 40.0f + 20 };
         CollisionPoly* poly = nullptr;
         s32 bg = 0;
         f.y[i] = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &poly, &bg, &link()->actor, &ray);
         if (isBlockCollider(bg)) f.y[i] = -32000;
     }
     write(shared, FLOOR, f);
-}
-
-// A wider grid of floor heights for digging: Minecraft needs to know which cells around
-// a hole are underground. Sampled like the small grid, from a little above the player.
-void publishWideFloor() {
-    if (!live() || !world() || port.frame % 8 != 4) return;
-    struct Floors { uint32_t epoch; int32_t x, z; float y[WIDE_SIDE * WIDE_SIDE]; };
-    static Floors f;
-    f.epoch = port.epoch;
-    f.x = (int)std::floor(mc.x / 40) - WIDE_SIDE / 2;
-    f.z = (int)std::floor(mc.z / 40) - WIDE_SIDE / 2;
-    float lift;
-    std::memcpy(&lift, shared + DIG_LIFT, 4);
-    if (!std::isfinite(lift) || lift < 0 || lift > 2000) lift = 0;
-    for (int i = 0; i < WIDE_SIDE * WIDE_SIDE; i++) {
-        Vec3f ray{ (f.x + i % WIDE_SIDE) * 40.0f + 20, mc.y + 80 + lift, (f.z + i / WIDE_SIDE) * 40.0f + 20 };
-        CollisionPoly* poly = nullptr;
-        s32 bg = 0;
-        f.y[i] = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &poly, &bg, &link()->actor, &ray);
-        if (isBlockCollider(bg)) f.y[i] = -32000;
-    }
-    write(shared, WIDE_FLOOR, f);
 }
 
 // Zelda fire and explosions that Minecraft should react to (igniting TNT): fire arrows
@@ -597,7 +648,7 @@ void pump() {
     port.scene = world() ? gPlayState->sceneNum : 0xFFFFFFFF;
     release(shared + 20, gSaveContext.gameMode);
     publishFloor();
-    publishWideFloor();
+    publishDigHit();
     publishEnemies();
     publishFire();
     port.frame++;

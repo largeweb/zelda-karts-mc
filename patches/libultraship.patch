@@ -1,7 +1,7 @@
-diff --git a/cmake/dependencies/common.cmake b/cmake/dependencies/common.cmake
+diff --git i/cmake/dependencies/common.cmake w/cmake/dependencies/common.cmake
 index 80dec56e..7da3fe52 100644
---- a/cmake/dependencies/common.cmake
-+++ b/cmake/dependencies/common.cmake
+--- i/cmake/dependencies/common.cmake
++++ w/cmake/dependencies/common.cmake
 @@ -52,7 +52,12 @@ endif()
  
  #=================== STB ===================
@@ -16,10 +16,10 @@ index 80dec56e..7da3fe52 100644
  file(WRITE "${STB_DIR}/stb_impl.c" "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"")
  
  add_library(stb STATIC)
-diff --git a/src/fast/backends/gfx_sdl2.cpp b/src/fast/backends/gfx_sdl2.cpp
+diff --git i/src/fast/backends/gfx_sdl2.cpp w/src/fast/backends/gfx_sdl2.cpp
 index 15c5415f..769a4a09 100644
---- a/src/fast/backends/gfx_sdl2.cpp
-+++ b/src/fast/backends/gfx_sdl2.cpp
+--- i/src/fast/backends/gfx_sdl2.cpp
++++ w/src/fast/backends/gfx_sdl2.cpp
 @@ -694,6 +694,7 @@ static uint64_t qpc_to_100ns(uint64_t qpc) {
      return qpc / qpc_freq * _100NANOSECONDS_IN_SECOND + qpc % qpc_freq * _100NANOSECONDS_IN_SECOND / qpc_freq;
  }
@@ -84,3 +84,29 @@ index 15c5415f..769a4a09 100644
  }
  
  void GfxWindowBackendSDL2::SwapBuffersEnd() {
+diff --git i/src/fast/interpreter.cpp w/src/fast/interpreter.cpp
+index 2b51ad7f..c0b77199 100644
+--- i/src/fast/interpreter.cpp
++++ w/src/fast/interpreter.cpp
+@@ -3331,12 +3331,20 @@ bool gfx_invalidate_tex_cache_handler_f3dex2(F3DGfx** cmd) {
+     return false;
+ }
+ 
++extern "C" void CompositeSceneDrawn() __attribute__((weak));
+ bool gfx_noop_handler_f3dex2(F3DGfx** cmd0) {
+     F3DGfx* cmd = *cmd0;
+     const char* filename = (const char*)(cmd)->words.w1;
+     uint32_t p = C0(16, 8);
+     uint32_t l = C0(0, 16);
+-    if (p == 7) {
++    if (p == 0x43) {
++        // Composite bridge: the scene's own geometry has been submitted and actors
++        // come next. Draw what is batched so the depth buffer holds the scene alone.
++        if (CompositeSceneDrawn) {
++            mInstance.lock()->Flush();
++            CompositeSceneDrawn();
++        }
++    } else if (p == 7) {
+         g_exec_stack.openDisp(filename, l);
+     } else if (p == 8) {
+         if (g_exec_stack.disp_stack.size() == 0) {
