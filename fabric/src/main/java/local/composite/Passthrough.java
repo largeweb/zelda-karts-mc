@@ -38,7 +38,6 @@ public final class Passthrough {
  public static boolean aiming(){return active()&&aiming;}
  /** Tells Zelda the far plane Minecraft renders with, so exported depth matches Minecraft's. */
  public static void depthFar(float far){WorldFrame.far=far;if(shared!=null)shared.f(60,far);}
- public static void dig(Minecraft mc){Digging.start(mc,shared);}
  public static boolean interactive(){return active()&&!locked;}
  public static boolean active(){return ENABLED&&attached&&System.nanoTime()-heartbeat<1_000_000_000L;}
  static ByteBuffer buffer(int n){return ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN);}

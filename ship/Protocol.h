@@ -5,7 +5,7 @@
 // Little-endian, x86-64, 2048 bytes. Offsets mirrored by Shared.java.
 namespace composite {
 constexpr uint32_t MAGIC=0x434D4D31, VERSION=3;
-constexpr int SIZE=2048, PORT=64, MC=192, REQUEST=320, REPLY=384;
+constexpr int SIZE=8192, PORT=64, MC=192, REQUEST=320, REPLY=384;
 constexpr float SCALE=40.0f;
 struct Port { uint32_t epoch, active, buttons; int32_t mouseX, mouseY; float x,y,z; uint32_t target; float tx,ty,tz; uint32_t scene, frame; };
 struct Minecraft { uint32_t epoch, tick; float x,y,z,yaw,pitch; uint32_t grounded, block, event; float bx,by,bz; };

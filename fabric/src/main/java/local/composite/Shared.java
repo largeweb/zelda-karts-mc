@@ -8,7 +8,7 @@ import java.nio.file.*;
 import java.util.concurrent.locks.LockSupport;
 
 public final class Shared implements AutoCloseable {
-    public static final int MAGIC=0x434D4D31, SIZE=2048, PORT=64, MC=192, REQUEST=320, REPLY=384;
+    public static final int MAGIC=0x434D4D31, SIZE=8192, PORT=64, MC=192, REQUEST=320, REPLY=384;
     private static final VarHandle I=MethodHandles.byteBufferViewVarHandle(int[].class,ByteOrder.LITTLE_ENDIAN);
     private final FileChannel file;
     public final MappedByteBuffer mem;

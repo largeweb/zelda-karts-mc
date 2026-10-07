@@ -8,32 +8,42 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 /**
  * Digging into Zelda's floors.
  *
- * Hitting Zelda ground turns that spot into a real Minecraft block ("revealing" its
- * column): the compositor stops drawing Zelda's floor there and Zelda's floor collision
- * is ignored there, so the block and whatever is dug beneath it take over. Underground
- * is generated lazily: whenever a generated block is removed, its still-buried
- * neighbours are filled in, so a hole is always lined with blocks and never opens onto
- * the void. Walls are left alone; only floors can be revealed.
+ * Zelda ground is mined in place: holding attack on it shows Minecraft's cracks on the
+ * Zelda surface itself, and when it breaks that column's floor is removed ("revealed")
+ * so the hole and the blocks lining it show. The compositor stops drawing Zelda's floor
+ * there and Zelda's floor collision is ignored there.
+ *
+ * Underground is generated lazily: whenever a cell is opened, its buried neighbours are
+ * filled with dirt or stone, so a hole is always lined and never opens onto the void.
+ * A neighbour counts as buried when it fits entirely under its own column's floor, so
+ * lining never pokes out of a slope. When Zelda has no floor information for a column
+ * it is assumed solid, because an unlined gap is a fall out of the world.
  */
 public final class Digging {
- /** Columns whose Zelda floor has been replaced, with the floor height (absolute block Y) and surface material. */
+ /** Columns whose Zelda floor has been removed: the floor height (absolute block Y) and its material. */
  private record Column(float height,int material){}
  private static final Map<Long,Column> revealed=new ConcurrentHashMap<>();
- /** Cells that have been generated at some point; an empty one was dug out and must stay empty. */
+ /** Cells that are or were part of a dig; an empty one was dug out and must stay empty. */
  private static final Set<Long> opened=ConcurrentHashMap.newKeySet();
- /** Last known Zelda floor height per column near the player, for deciding what counts as buried. */
+ /** Zelda floor heights per column around the player; NaN where Zelda found no floor. */
  private static final Map<Long,Float> floors=new ConcurrentHashMap<>();
- private static final int MAP=64,DEPTH_STONE=4,DEPTH_BEDROCK=24;
- private static final float NONE=-1000;
- private static Path file;private static boolean loaded,dirty;private static int ticks,lastMaterial;
+ private static final int MAP=64,WIDE=2048,WIDE_SIDE=25,DEPTH_STONE=4,DEPTH_BEDROCK=24;
+ private static final float NONE=-1000,FLUSH=.05f;
+ private static Path file;private static boolean loaded,dirty;private static int ticks,wideSerial,lastMode;
  private static final FloatBuffer map=ByteBuffer.allocateDirect(MAP*MAP*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
  private static int mapX=Integer.MIN_VALUE,mapZ;private static boolean mapDirty=true;
+ // The Zelda surface cell being mined right now, for the crack overlay.
+ private static BlockPos mining;private static float miningHeight,progress;private static int swingTicks;
 
  private static long column(int x,int z){return ((long)x<<32)^(z&0xffffffffL);}
  private static long cell(BlockPos p){return p.asLong();}
@@ -43,8 +53,12 @@ public final class Digging {
  // --- compositor data -------------------------------------------------------------
  public static int mapX(){return mapX;}
  public static int mapZ(){return mapZ;}
- public static boolean any(){return !revealed.isEmpty();}
- /** A MAP x MAP grid of revealed floor heights around the player, or null when unchanged. */
+ public static boolean any(){return !revealed.isEmpty()||mining!=null;}
+ public static BlockPos mining(){return mining;}
+ public static float miningHeight(){return miningHeight;}
+ /** Vanilla crack stage 0-9 for the surface being mined. */
+ public static int miningStage(){return Math.clamp((int)(progress*10),0,9);}
+ /** A MAP x MAP grid of removed floor heights around the player, or null when unchanged. */
  public static ByteBuffer mapIfChanged(BlockPos player){
   if(Math.abs(player.getX()-(mapX+MAP/2))>MAP/4||Math.abs(player.getZ()-(mapZ+MAP/2))>MAP/4||mapX==Integer.MIN_VALUE){mapX=player.getX()-MAP/2;mapZ=player.getZ()-MAP/2;mapDirty=true;}
   if(!mapDirty)return null;
@@ -57,42 +71,64 @@ public final class Digging {
  public static void tick(Minecraft mc,Shared shm,int epoch){
   var server=mc.getSingleplayerServer();if(server==null||mc.player==null)return;
   load(server.getWorldPath(LevelResource.ROOT));
-  // Remember Zelda's floor heights from the grid it publishes around the player.
-  var grid=shm.snapshot(1536,336);
-  if(grid!=null&&grid.getInt(0)==epoch){
-   int gx=grid.getInt(4)+(int)Passthrough.origin(),gz=grid.getInt(8);
-   for(int i=0;i<81;i++){float y=grid.getFloat(12+i*4);if(Float.isFinite(y)&&y>-30000&&y<30000)floors.put(column(gx+i%9,gz+i/9),1024+y/40f);}
-   if(floors.size()>20000)floors.clear();
-  }
+  readFloors(shm,epoch);
   // Tell Zelda how to treat the player: on its floor, over a hole, or fully underground.
   var feet=mc.player.blockPosition();long col=column(feet.getX(),feet.getZ());
-  var here=revealed.get(col);Float floor=here!=null?Float.valueOf(here.height()):floors.get(col);
-  int mode=0;float lift=0;
+  var here=revealed.get(col);Float floor=here!=null?Float.valueOf(here.height()):known(floors.get(col));
+  int mode=lastMode;float lift=0;
   if(floor!=null){
    double y=mc.player.getY();
-   if(y<floor-1)mode=2;else if(here!=null)mode=1;
+   mode=y<floor-1?2:here!=null?1:0;
    // Zelda samples floors from just above the player; underground, lift that to the surface.
    if(y<floor)lift=(float)((floor-y)*40);
-  }else mode=lastMode;
+  }
   lastMode=mode;
   shm.set(8,mode);shm.f(16,lift);
+  mine(mc,shm);
   if(dirty&&++ticks%100==0)save();
  }
- private static int lastMode;
+ private static Float known(Float height){return height==null||height.isNaN()?null:height;}
+ private static void readFloors(Shared shm,int epoch){
+  int serial=shm.get(WIDE);if(serial==wideSerial)return;
+  var grid=shm.snapshot(WIDE,12+WIDE_SIDE*WIDE_SIDE*4);
+  if(grid==null||grid.getInt(0)!=epoch)return;
+  wideSerial=serial;
+  if(floors.size()>40000)floors.clear();
+  int gx=grid.getInt(4)+(int)Passthrough.origin(),gz=grid.getInt(8);
+  for(int i=0;i<WIDE_SIDE*WIDE_SIDE;i++){
+   float y=grid.getFloat(12+i*4);
+   floors.put(column(gx+i%WIDE_SIDE,gz+i/WIDE_SIDE),Float.isFinite(y)&&y>-30000&&y<30000?1024+y/40f:Float.NaN);
+  }
+ }
 
- /** Attack on bare Zelda ground: reveal that column and put its surface block there. */
- public static void start(Minecraft mc,Shared shm){
-  if(!Passthrough.interactive()||!NativeBlocks.inDimension()||mc.player==null||mc.gui.screen()!=null)return;
-  if(NativeButtons.empty(mc)||ZeldaItems.holding(mc))return;
-  if(mc.hitResult!=null&&mc.hitResult.getType()!=net.minecraft.world.phys.HitResult.Type.MISS)return;
-  var above=NativeBlocks.target;if(above==null||shm==null)return;
-  float height=NativeBlocks.targetHeight;int material=shm.get(12);
-  var top=new BlockPos(above.getX(),surfaceCell(height),above.getZ());
-  if(net.minecraft.world.phys.Vec3.atCenterOf(top).distanceTo(mc.player.getEyePosition())>5.5||surfaceBlock(material)==null)return;
-  var server=mc.getSingleplayerServer();if(server==null)return;
-  lastMaterial=material;
-  reveal(top.getX(),top.getZ(),height,material);
-  server.execute(()->{var level=server.getLevel(NativeBlocks.DIMENSION);if(level!=null)generate(level,top);});
+ /** Holding attack on bare Zelda ground mines it like a block of that material. */
+ private static void mine(Minecraft mc,Shared shm){
+  BlockPos target=null;float height=0;int material=0;Block surface=null;
+  if(Passthrough.interactive()&&NativeBlocks.inDimension()&&mc.gui.screen()==null&&mc.options.keyAttack.isDown()
+     &&!NativeButtons.empty(mc)&&!ZeldaItems.holding(mc)&&(mc.hitResult==null||mc.hitResult.getType()==HitResult.Type.MISS)&&NativeBlocks.target!=null){
+   height=NativeBlocks.targetHeight;material=shm.get(12);surface=surfaceBlock(material);
+   target=new BlockPos(NativeBlocks.target.getX(),surfaceCell(height),NativeBlocks.target.getZ());
+   if(surface==null||revealed(target.getX(),target.getZ())||Vec3.atCenterOf(target).distanceTo(mc.player.getEyePosition())>5.5)target=null;
+  }
+  if(target==null){mining=null;progress=0;return;}
+  if(!target.equals(mining)){mining=target;miningHeight=height;progress=0;}
+  var state=surface.defaultBlockState();
+  progress+=mc.player.getAbilities().instabuild?1:state.getDestroyProgress(mc.player,mc.level,target);
+  if(swingTicks++%4==0)mc.player.swing(InteractionHand.MAIN_HAND,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+  if(progress<1)return;
+  var top=target;float h=height;int m=material;boolean drops=!mc.player.getAbilities().instabuild;
+  mining=null;progress=0;
+  reveal(top.getX(),top.getZ(),h,m);
+  var server=mc.getSingleplayerServer();
+  server.execute(()->{
+   var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
+   // Whatever stood in for the floor here (item support) goes; the cell is now open air.
+   if(level.getBlockState(top).is(Blocks.BARRIER))level.setBlock(top,Blocks.AIR.defaultBlockState(),3);
+   opened.add(cell(top));dirty=true;
+   level.levelEvent(2001,top,Block.getId(state)); // break sound and particles
+   if(drops)Block.dropResources(state,level,top);
+   line(level,top,h,m);
+  });
  }
 
  private static void reveal(int x,int z,float height,int material){
@@ -105,26 +141,31 @@ public final class Digging {
   if(!loaded||!level.dimension().equals(NativeBlocks.DIMENSION)||!after.isAir()||before.isAir()||before.is(Blocks.BARRIER)||!opened.contains(cell(pos)))return;
   var at=pos.immutable();
   level.getServer().execute(()->{
-   // Breaking a column's surface block from below or the side opens that column from above too.
-   Float floor=height(at.getX(),at.getZ());
-   if(floor!=null&&at.getY()==surfaceCell(floor))reveal(at.getX(),at.getZ(),floor,lastMaterial);
-   for(var direction:Direction.values())generate(level,at.relative(direction));
+   var source=revealed.get(column(at.getX(),at.getZ()));
+   Float floor=source!=null?Float.valueOf(source.height()):known(floors.get(column(at.getX(),at.getZ())));
+   line(level,at,floor==null?at.getY()+1:floor,source==null?0:source.material());
   });
  }
- private static Float height(int x,int z){var c=revealed.get(column(x,z));return c!=null?Float.valueOf(c.height()):floors.get(column(x,z));}
- private static void generate(ServerLevel level,BlockPos pos){
-  Float floor=height(pos.getX(),pos.getZ());
-  if(floor==null||pos.getY()+.5>=floor||!opened.add(cell(pos)))return;
-  dirty=true;
-  var state=level.getBlockState(pos);
-  if(!state.isAir()&&!state.is(Blocks.BARRIER))return;
-  var column=revealed.get(column(pos.getX(),pos.getZ()));
-  int material=column!=null?column.material():lastMaterial,depth=surfaceCell(floor)-pos.getY();
-  var block=depth>=DEPTH_BEDROCK?Blocks.BEDROCK:depth>=DEPTH_STONE?Blocks.STONE:depth>0?subsoil(material):surfaceBlock(material);
-  level.setBlock(pos,(block==null?Blocks.DIRT:block).defaultBlockState(),3);
+ /** Fill the buried neighbours of an opened cell. */
+ private static void line(ServerLevel level,BlockPos open,float sourceFloor,int sourceMaterial){
+  for(var direction:Direction.values()){
+   var pos=open.relative(direction);
+   if(opened.contains(cell(pos)))continue;
+   var column=revealed.get(column(pos.getX(),pos.getZ()));
+   Float measured=floors.get(column(pos.getX(),pos.getZ()));
+   // No information, or no Zelda floor there at all: assume solid ground level with this dig.
+   float floor=column!=null?column.height():measured==null||measured.isNaN()?sourceFloor:measured;
+   if(pos.getY()+1>floor+FLUSH)continue; // would stick out of the ground: leave it to Zelda's surface
+   var state=level.getBlockState(pos);
+   opened.add(cell(pos));dirty=true;
+   if(!state.isAir()&&!state.is(Blocks.BARRIER))continue;
+   int material=column!=null?column.material():sourceMaterial,depth=surfaceCell(floor)-pos.getY();
+   var block=depth>=DEPTH_BEDROCK?Blocks.BEDROCK:depth>=DEPTH_STONE?Blocks.STONE:subsoil(material);
+   level.setBlock(pos,block.defaultBlockState(),3);
+  }
  }
- /** Zelda floor material to the block its surface becomes; null where digging is not allowed. */
- private static net.minecraft.world.level.block.Block surfaceBlock(int material){
+ /** Zelda floor material to the block it mines as; null where digging is not allowed. */
+ private static Block surfaceBlock(int material){
   return switch(material){
    case 1->Blocks.SAND;
    case 2->Blocks.STONE;
@@ -134,7 +175,7 @@ public final class Digging {
    default->Blocks.GRASS_BLOCK;
   };
  }
- private static net.minecraft.world.level.block.Block subsoil(int material){
+ private static Block subsoil(int material){
   return switch(material){case 1->Blocks.SANDSTONE;case 2,12->Blocks.STONE;default->Blocks.DIRT;};
  }
 

@@ -43,7 +43,7 @@ constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 12
               COMBAT = 1408, FLOOR = 1536, ENEMIES = 1888;
 // Header fields written by Minecraft for dug floors: how to treat the player, and how far
 // above the player to start sampling Zelda floors when the player is below the surface.
-constexpr int DIG_MODE = 8, DIG_MATERIAL = 12, DIG_LIFT = 16;
+constexpr int DIG_MODE = 8, DIG_MATERIAL = 12, DIG_LIFT = 16, WIDE_FLOOR = 2048, WIDE_SIDE = 25;
 constexpr uint32_t DIG_OVER_HOLE = 1, DIG_UNDERGROUND = 2;
 constexpr uint32_t FLAG_ACTIVE = 1, FLAG_DIALOGUE = 2, FLAG_PAUSE = 4, FLAG_SCRIPTED = 8, FLAG_INSTRUMENT = 16, FLAG_AIMING = 32;
 // Control bits published by Minecraft.
@@ -244,7 +244,8 @@ void target() {
     Vec3f ray{ x + 20, hit.y + 25, z + 20 };
     CollisionPoly* floor = nullptr;
     float y = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &floor, &bg, &link()->actor, &ray);
-    if (y < -31000 || std::abs(y - hit.y) > 24) return;
+    // The floor under the cell's centre may sit well above or below the aimed-at point on a slope.
+    if (y < -31000 || std::abs(y - hit.y) > 45) return;
     release(shared + DIG_MATERIAL, func_80041F10(&gPlayState->colCtx, floor, bg));
     port.target = 1;
     port.tx = x;
@@ -289,6 +290,28 @@ void publishFloor() {
         if (isBlockCollider(bg)) f.y[i] = -32000;
     }
     write(shared, FLOOR, f);
+}
+
+// A wider grid of floor heights for digging: Minecraft needs to know which cells around
+// a hole are underground. Sampled like the small grid, from a little above the player.
+void publishWideFloor() {
+    if (!live() || !world() || port.frame % 8 != 4) return;
+    struct Floors { uint32_t epoch; int32_t x, z; float y[WIDE_SIDE * WIDE_SIDE]; };
+    static Floors f;
+    f.epoch = port.epoch;
+    f.x = (int)std::floor(mc.x / 40) - WIDE_SIDE / 2;
+    f.z = (int)std::floor(mc.z / 40) - WIDE_SIDE / 2;
+    float lift;
+    std::memcpy(&lift, shared + DIG_LIFT, 4);
+    if (!std::isfinite(lift) || lift < 0 || lift > 2000) lift = 0;
+    for (int i = 0; i < WIDE_SIDE * WIDE_SIDE; i++) {
+        Vec3f ray{ (f.x + i % WIDE_SIDE) * 40.0f + 20, mc.y + 80 + lift, (f.z + i / WIDE_SIDE) * 40.0f + 20 };
+        CollisionPoly* poly = nullptr;
+        s32 bg = 0;
+        f.y[i] = BgCheck_EntityRaycastFloor5(gPlayState, &gPlayState->colCtx, &poly, &bg, &link()->actor, &ray);
+        if (isBlockCollider(bg)) f.y[i] = -32000;
+    }
+    write(shared, WIDE_FLOOR, f);
 }
 
 // Zelda fire and explosions that Minecraft should react to (igniting TNT): fire arrows
@@ -574,6 +597,7 @@ void pump() {
     port.scene = world() ? gPlayState->sceneNum : 0xFFFFFFFF;
     release(shared + 20, gSaveContext.gameMode);
     publishFloor();
+    publishWideFloor();
     publishEnemies();
     publishFire();
     port.frame++;
