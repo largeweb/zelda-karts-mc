@@ -103,15 +103,24 @@ public final class Passthrough {
   wasGrounded=player.onGround();
   // Native Minecraft renders/mines every block; only nearby full cubes are mirrored
   // into Zelda for native arrows/actors. Partial shapes use vanilla player collision.
-  ByteBuffer layer=buffer(208);layer.putInt(epoch).putInt(0).putInt(16).putInt(-1);
-  int count=0;var center=player.blockPosition();
+  ByteBuffer layer=buffer(208);layer.putInt(epoch).putInt(0).putInt(16).putInt(0);
+  int count=0,hookable=0;var center=player.blockPosition();
+  // The hookshot reaches much further than that: the block it is aimed at goes first,
+  // marked if the hook can bite into it (wood and the like, as in Zelda).
+  var aimedAt=NativeBlocks.inDimension()?Hookshot.target(mc):null;
+  if(aimedAt!=null){
+   layer.putFloat((float)((aimedAt.getX()-origin())*SCALE)).putFloat((float)((aimedAt.getY()-BASE)*SCALE)).putFloat((float)(aimedAt.getZ()*SCALE));
+   if(Hookshot.grips(mc.level.getBlockState(aimedAt)))hookable|=1;
+   count++;
+  }
   if(NativeBlocks.inDimension())for(var bp:net.minecraft.core.BlockPos.betweenClosed(center.offset(-4,-3,-4),center.offset(4,4,4))){
    if(count==16)break;var bs=mc.level.getBlockState(bp);
+   if(bp.equals(aimedAt))continue;
    if(!bs.is(net.minecraft.world.level.block.Blocks.BARRIER)&&bs.isCollisionShapeFullBlock(mc.level,bp)){
     layer.putFloat((float)((bp.getX()-origin())*SCALE)).putFloat((float)((bp.getY()-BASE)*SCALE)).putFloat((float)(bp.getZ()*SCALE));count++;
    }
   }
-  layer.putInt(4,count);layer.putInt(8,16-count);shm.publish(1024,layer);
+  layer.putInt(4,count);layer.putInt(8,16-count);layer.putInt(12,hookable);shm.publish(1024,layer);
   int event=0;
   ByteBuffer out=buffer(52);out.putInt(epoch).putInt(++tick).putFloat((float)feet.x).putFloat((float)feet.y).putFloat((float)feet.z).putFloat(player.getYRot()).putFloat(player.getXRot()).putInt(player.onGround()?1:0).putInt(0).putInt(event).putFloat(0).putFloat(0).putFloat(0);shm.publish(out);
   // Ordinary held items belong to Minecraft; empty hands use native A/B; a held

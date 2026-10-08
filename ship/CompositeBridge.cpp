@@ -165,7 +165,8 @@ bool nativeOwnsMotion() {
            (p->stateFlags1 & (PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE |
                               PLAYER_STATE1_CLIMBING_LADDER | PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_GETTING_ITEM |
                               PLAYER_STATE1_TALKING)) ||
-           (p->stateFlags2 & (PLAYER_STATE2_GRABBED_BY_ENEMY | PLAYER_STATE2_CRAWLING | PLAYER_STATE2_FROZEN));
+           (p->stateFlags2 & (PLAYER_STATE2_GRABBED_BY_ENEMY | PLAYER_STATE2_CRAWLING | PLAYER_STATE2_FROZEN)) ||
+           (p->stateFlags3 & PLAYER_STATE3_FLYING_WITH_HOOKSHOT); // the chain is pulling him in
 }
 bool cameraFree() {
     return world() && !nativeOwnsMotion() && !gPlayState->msgCtx.msgLength && !gPlayState->pauseCtx.state &&
@@ -749,6 +750,13 @@ void bridgePlay() {
         equipHeld(held);
         playerRequests();
     }
+    if (live()) {
+        // Every item works everywhere: the game's own per-area bans (no hookshot in the
+        // Temple of Time, no items in shops and so on) are lifted.
+        auto& banned = gPlayState->interfaceCtx.restrictions;
+        banned.bButton = banned.bottles = banned.tradeItems = banned.hookshot = banned.ocarina = banned.warpSongs = banned.sunsSong =
+            banned.farores = banned.dinsNayrus = banned.all = 0;
+    }
     if (live() && (control.flags & CONTROL_CREATIVE)) {
         // Creative: nothing runs out.
         gSaveContext.isMagicAcquired = 1;
@@ -771,6 +779,14 @@ void bridgePlay() {
     // A held Zelda item: attack swings a sword, use fires or raises whatever is in hand.
     if (b & KEY_ATTACK) pad |= BTN_B;
     if (b & KEY_USE) pad |= isSword(held) ? BTN_R : held < ITEM_SWORD_KOKIRI ? BTN_CLEFT : BTN_A;
+    // The game keeps Link in its aiming stance after a shot until A is pressed. Putting
+    // the item away (another hotbar slot) is that press.
+    static uint32_t heldBefore = ITEM_NONE;
+    static int lowering = 0;
+    if (held != heldBefore && world() && link()->unk_6AD != 0) lowering = 3;
+    heldBefore = held;
+    if (lowering > 0 && world() && link()->unk_6AD != 0) lowering--, pad |= BTN_A;
+    else lowering = 0;
     if ((press & KEY_OCARINA) && free) {
         equipHeld(ITEM_OCARINA_TIME);
         pad |= BTN_CLEFT;

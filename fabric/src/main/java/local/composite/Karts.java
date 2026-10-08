@@ -55,7 +55,7 @@ public final class Karts {
     }
     // The kart engine loads one character's kart when it starts.
     guestCharacter=character;
-    say("Bringing "+CHARACTERS[character]+"'s kart; it takes a few seconds to arrive. "+keys);
+    say("Bringing "+CHARACTERS[character]+"'s kart; it takes about eight seconds to arrive. "+keys);
     try{Engine.startKart(Map.of("COMPOSITE_CHARACTER",Integer.toString(character),"COMPOSITE_KART_AT",at));}
     catch(Exception e){guestCharacter=-1;say("Could not start Mario Kart: "+e.getMessage());}
     return;

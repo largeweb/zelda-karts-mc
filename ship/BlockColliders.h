@@ -2,12 +2,16 @@
 // actors and projectiles are stopped by blocks. Included in the bridge namespace.
 DynaPolyActor cubeActors[MAX_BLOCKS]{};
 s32 cubeBg[MAX_BLOCKS];
+bool cubeGrips[MAX_BLOCKS]{}; // made as something the hookshot sticks in
 bool cubesInitialized = false;
 Vec3s cubeVertices[8] = { { 0, 0, 0 }, { 40, 0, 0 }, { 40, 40, 0 }, { 0, 40, 0 }, { 0, 0, 40 }, { 40, 0, 40 }, { 40, 40, 40 }, { 0, 40, 40 } };
 CollisionPoly cubePolys[12]{};
 SurfaceType cubeSurface[1]{};
+// The same cube for blocks the hookshot grapples to (wood and the like): Zelda decides
+// that from the surface type, bit 17 of its second word.
+SurfaceType cubeSurfaceGrip[1] = { { { 0, 1u << 17 } } };
 CamData cubeCam[1]{};
-CollisionHeader cubeCollision{};
+CollisionHeader cubeCollision{}, cubeCollisionGrip{};
 
 bool isBlockCollider(s32 bg) {
     if (!cubesInitialized) return false;
@@ -49,10 +53,20 @@ void updateBlockColliders() {
     cubeCollision.surfaceTypeList = cubeSurface;
     cubeCollision.cameraDataList = cubeCam;
     cubeCollision.cameraDataListLen = 1;
+    cubeCollisionGrip = cubeCollision;
+    cubeCollisionGrip.surfaceTypeList = cubeSurfaceGrip;
     for (uint32_t i = 0; i < blocks.count; i++) {
         auto& actor = cubeActors[i];
         auto pos = blocks.positions[i];
+        // Minecraft marks which blocks grip, one bit per block.
+        bool grips = blocks.aimed >> i & 1;
+        if (cubeBg[i] != BG_ACTOR_MAX && cubeGrips[i] != grips && !(actor.actor.flags & ACTOR_FLAG_HOOKSHOT_ATTACHED)) {
+            DynaPoly_DeleteBgActor(gPlayState, &gPlayState->colCtx.dyna, cubeBg[i]);
+            cubeBg[i] = BG_ACTOR_MAX;
+        }
         if (cubeBg[i] != BG_ACTOR_MAX) {
+            // A block the hook is in stays where it is until the hook lets go.
+            if (actor.actor.flags & ACTOR_FLAG_HOOKSHOT_ATTACHED) continue;
             actor.actor.world.pos = { pos.x, pos.y, pos.z };
             continue;
         }
@@ -62,7 +76,8 @@ void updateBlockColliders() {
         actor.actor.scale = { 1, 1, 1 };
         actor.actor.world.pos = { pos.x, pos.y, pos.z };
         actor.actor.update = [](Actor*, PlayState*) {};
-        cubeBg[i] = DynaPoly_SetBgActor(gPlayState, &gPlayState->colCtx.dyna, &actor.actor, &cubeCollision);
+        cubeGrips[i] = grips;
+        cubeBg[i] = DynaPoly_SetBgActor(gPlayState, &gPlayState->colCtx.dyna, &actor.actor, grips ? &cubeCollisionGrip : &cubeCollision);
         actor.bgId = cubeBg[i];
     }
 }

@@ -34,6 +34,8 @@ public final class Guide {
    "Minecraft swords, axes, bows and crossbows hurt Zelda enemies.",
    "TNT and other explosions hurt them too, like a bomb.",
    "Fire arrows, Din's Fire and Zelda bomb blasts set off TNT.",
+   "The hookshot grapples to wooden blocks (planks, logs, chests...) and bounces off the rest.",
+   "After a shot Link keeps the item raised; switch hotbar slot to lower it.",
    "Blocks you place are hidden behind Hyrule's walls and ground, as you would expect.",
    "Place blocks, chests, furnaces and redstone anywhere; they are saved with the world.")),
   new Page("Digging into Hyrule",List.of(
@@ -56,7 +58,7 @@ public final class Guide {
    "Right click with an empty hand beside a parked kart to get back on.",
    "Picking a different character reloads the track for a moment.",
    "Karts also work everywhere in Hyrule if Mario Kart 64 is installed: /spawnkart there",
-   "starts the kart game alongside (a few seconds) and the kart drives on Zelda's ground.",
+   "starts the kart game alongside (about eight seconds) and the kart drives on Zelda's ground.",
    "Leaving an area leaves the kart behind; /spawnkart again brings one to you.")),
   new Page("Worlds and saving",List.of(
    "Create New World has a Map button: plain Minecraft, Ocarina of Time, or a Mario Kart 64 track.",

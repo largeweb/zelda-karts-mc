@@ -30,8 +30,10 @@ extern "C" {
 #include "code_80005FD0.h"
 #include "mk64.h"
 #include "common_structs.h"
+#include "kart_attributes.h"
 extern s32 gGamestate, gGamestateNext, gModeSelection, gPlayerCountSelection1, gCCSelection;
 extern s32 gIsHUDVisible;
+extern s32 gRaceState;
 extern s32 D_8015F59C, D_8015F5A0, D_8015F5A4;
 void add_collision_triangle(Vtx* vtx1, Vtx* vtx2, Vtx* vtx3, s8 surfaceType, u16 sectionId);
 void generate_collision_grid(void);
@@ -143,6 +145,7 @@ bool init() {
                                "gDrawObjects", "gDrawTransparentTrack" })
         CVarSetInteger(layer, guest ? 0 : 1);
     CVarSetFloat("gGameMasterVolume", guest ? 0.0f : 1.0f);
+    CVarSetInteger("gDrawPlayers", 1);
     spdlog::info("[Composite] Bridge ready{}", guest ? " (guest: karts only)" : "");
     return true;
 }
@@ -343,8 +346,11 @@ void placeKart(float x, float y, float z, float yawDegrees) {
     kart->pos[2] = kart->oldPos[2] = z;
     kart->velocity[0] = kart->velocity[1] = kart->velocity[2] = 0;
     kart->speed = 0;
-    kart->rotation[1] = (s16)(int)(-yawDegrees * (32768.0f / 180)); // the game turns the other way round from Minecraft
+    kart->rotation[1] = (s16)(int)(yawDegrees * (32768.0f / 180)); // both games turn the same way from the same zero
 }
+// The last ground a guest's kart stood on (x, floor, z, facing), and whether one is on its way.
+float safe[4] = { 0, 0, 0, 0 };
+bool safeKnown = false, arriving = false, started = false;
 void forgetGround(Player* kart);
 void kartRequests() {
     Control control{};
@@ -354,6 +360,12 @@ void kartRequests() {
     if (control.request == REQUEST_DISMOUNT) riding = false;
     else if (control.request != REQUEST_MOUNT || spawned) {
         // Bring the kart to the player unless they are getting back on where it stands.
+        if (control.request != REQUEST_MOUNT && guest) {
+            // As a guest the kart arrives as soon as the game and its ground are ready.
+            safe[0] = mc.x / K, safe[1] = mc.y / K, safe[2] = mc.z / K, safe[3] = mc.yaw;
+            safeKnown = arriving = true;
+            return;
+        }
         if (control.request != REQUEST_MOUNT) {
             placeKart(mc.x / K, mc.y / K, mc.z / K, mc.yaw);
             forgetGround(gPlayerOne);
@@ -371,15 +383,17 @@ std::vector<Vtx> hostCorners;
 std::vector<CollisionTriangle> hostMesh;
 std::vector<u16> hostIndices;
 uint32_t hostEpoch = 0, hostScene = 0xFFFFFFFF;
-float safe[4] = { 0, 0, 0, 0 };
-bool safeKnown = false, awaitingGround = false;
 void forgetGround(Player* kart) {
     for (auto& tyre : kart->tyres) tyre.collisionMeshIndex = 0x1388;
     kart->collision.meshIndexYX = kart->collision.meshIndexZY = kart->collision.meshIndexZX = 0x1388;
 }
 void loadHostGround() {
+    // The game first lines its kart up on its own track and counts down; it needs its own
+    // ground for that, so the host's waits until the kart may move.
+    if (!started) return;
     const char* path = std::getenv("COMPOSITE_COLLISION");
-    if (!path || port.frame % 20 != 0) return;
+    // Looked at often until the first ground is in (the kart has nothing under it), then now and again.
+    if (!path || port.frame % (hostScene == 0xFFFFFFFF ? 2 : 20) != 0) return;
     FILE* file = std::fopen(path, "rb");
     if (!file) return;
     struct Head { uint32_t magic, epoch, scene, count; } head{};
@@ -395,9 +409,7 @@ void loadHostGround() {
     hostEpoch = head.epoch, hostScene = head.scene;
     // A new place: the kart does not come along. (One asked for as this game started is
     // waiting for exactly this ground.)
-    bool keep = awaitingGround;
-    awaitingGround = false;
-    if (!keep) spawned = riding = safeKnown = false;
+    if (!arriving) spawned = riding = safeKnown = false;
     hostCorners.assign(head.count * 3, Vtx{});
     hostMesh.assign(head.count + 1, CollisionTriangle{});
     hostIndices.assign(65536, 0);
@@ -426,15 +438,37 @@ void loadHostGround() {
     gTrackMaxX += 20, gTrackMaxZ += 20, gTrackMinX -= 20, gTrackMinZ -= 20, gTrackMinY -= 20;
     generate_collision_grid();
     if (gPlayerOne) forgetGround(gPlayerOne);
-    if (keep && gPlayerOne) placeKart(safe[0], safe[1], safe[2], safe[3]);
     spdlog::info("[Composite] Host scene {}: {} of {} triangles as ground, {} grid entries", head.scene, (int)gCollisionMeshCount,
                  head.count, (int)gNumCollisionTriangles);
 }
 // Keep a guest's kart out of sight until asked for, and on the ground once it is.
 void guestKart() {
     auto* kart = gPlayerOne;
-    // No water or pits here for the game to fish the kart out of.
+    if (!started) {
+        started = gRaceState == RACE_IN_PROGRESS && !(kart->type & PLAYER_START_SEQUENCE);
+        CVarSetInteger("gDrawPlayers", started ? 1 : 0); // not seen lining up on a track that is not there
+        return;
+    }
+    // No water or pits here for the game to fish the kart out of. Its rescue (Lakitu) can
+    // still be set off while the kart is parked or its ground is being swapped; he is
+    // not drawn here and would hold the kart for good, so he is always called off.
     CM_GetProps()->WaterLevel = -30000.0f;
+    const u32 rescue = LAKITU_RETRIEVAL | HELD_BY_LAKITU | LAKITU_FIZZLE | LAKITU_SCENE | LAKITU_LAVA | LAKITU_WATER | WENT_OVER_OOB;
+    if (kart->lakituProps & rescue) {
+        kart->lakituProps &= ~rescue;
+        kart->oobProps = 0;
+        if (gRaceState == RACE_IN_PROGRESS) kart->type &= ~PLAYER_START_SEQUENCE;
+        kart->kartGravity = gKartGravityTable[kart->characterId];
+    }
+    // The game counts down before a kart may move. One asked for as the game started
+    // stays out of sight until then, so it arrives ready to drive.
+    bool ready = hostScene != 0xFFFFFFFF;
+    if (arriving && ready) {
+        arriving = false;
+        placeKart(safe[0], safe[1], safe[2], safe[3]);
+        forgetGround(kart);
+        spawned = riding = true;
+    }
     if (!spawned) {
         kart->pos[0] = kart->oldPos[0] = mc.x / K;
         kart->pos[1] = kart->oldPos[1] = mc.y / K - 2000;
@@ -449,7 +483,7 @@ void guestKart() {
                      kart->pos[0], kart->pos[1], kart->pos[2], floor, kart->speed, (int)kart->type, (int)kart->effects, (int)kart->lakituProps,
                      (int)kart->oobProps, (int)kart->surfaceType, (int)kart->tyres[0].collisionMeshIndex, controls.controls);
     if (floor > -31000 && kart->pos[1] - floor < 2 * BLOCK) {
-        safe[0] = kart->pos[0], safe[1] = floor, safe[2] = kart->pos[2], safe[3] = -kart->rotation[1] * (180.0f / 32768);
+        safe[0] = kart->pos[0], safe[1] = floor, safe[2] = kart->pos[2], safe[3] = kart->rotation[1] * (180.0f / 32768);
         safeKnown = true;
     } else if (safeKnown && (kart->pos[1] < safe[1] - 30 * BLOCK || (floor < -31000 && kart->pos[1] < safe[1] - 3 * BLOCK))) {
         // Driven off the edge of the world, or slipped under its floor (ground is
@@ -495,7 +529,7 @@ void publish() {
     StoryPort story{};
     // While riding, the kart carries the player: Minecraft follows it and hides its own body.
     story.flags = 1 | (riding ? FLAG_RIDING : 0);
-    story.yaw = -gPlayerOne->rotation[1] * (180.0f / 32768);
+    story.yaw = gPlayerOne->rotation[1] * (180.0f / 32768);
     std::memset(story.items, 255, sizeof(story.items));
     write(shared, STORY_PORT, story);
     // The player is an ordinary Minecraft-sized body here.
@@ -540,12 +574,14 @@ extern "C" void CompositeTick() {
         const char* kartAt = std::getenv("COMPOSITE_KART_AT");
         riding = false;
         hostScene = 0xFFFFFFFF; // the track has just loaded its own collision over the host's
+        started = false;
         if (kartAt && std::sscanf(kartAt, "%f,%f,%f,%f", &at[0], &at[1], &at[2], &at[3]) == 4) {
-            placeKart(at[0] / K, at[1] / K, at[2] / K, at[3]);
+            if (!guest) placeKart(at[0] / K, at[1] / K, at[2] / K, at[3]);
             port.x = at[0], port.y = at[1], port.z = at[2];
-            riding = spawned = true;
+            riding = spawned = !guest;
             safe[0] = at[0] / K, safe[1] = at[1] / K, safe[2] = at[2] / K, safe[3] = at[3];
-            safeKnown = awaitingGround = true;
+            safeKnown = true;
+            arriving = guest;
         }
         mc = {};
         controls = {};

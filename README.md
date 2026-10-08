@@ -50,7 +50,15 @@ left). It steps through the games that are installed:
   behind; `/spawnkart` again brings one to you. Known limits: karts ignore
   Minecraft blocks and dug holes, moving platforms and doors are not solid to
   them, small steps can be driven through (the kart is put back if it ends up
-  under the floor), and the kart is silent.
+  under the floor), and the kart is silent. A new kart takes about eight seconds
+  to arrive the first time, while the kart game finishes its own start.
+
+- **Hookshot and blocks.** The hookshot and longshot hit Minecraft blocks. They
+  grapple to wood (logs, planks, wooden slabs, stairs, fences, doors, trapdoors,
+  chests, barrels, bookshelves, target and hay blocks and the like) and bounce off
+  everything else. Zelda's own per-area item bans (no hookshot in the Temple of
+  Time, no items in shops) are lifted: every item works everywhere. After a shot
+  Link keeps the item raised, as in the original; switching hotbar slot lowers it.
 
 Games that are not installed are listed in the button's tooltip with the reason.
 GoldenEye is listed but not supported yet.
