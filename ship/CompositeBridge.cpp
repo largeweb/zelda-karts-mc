@@ -55,6 +55,21 @@ constexpr int DIG_HIT = 4608, CLASSIFY_REQUEST = 4672, CLASSIFY_REPLY = 4928, CL
 // coordinates (normal towards the open side, and its offset). What lies behind the
 // plane is the solid part of the cell, which Minecraft draws and collides with.
 struct CellPlane { float nx, ny, nz, d; };
+// A cell can hold more than one surface (a step's top and its face, a wall meeting a
+// floor). Up to three differently-facing ones are kept; the cell's solid part is what
+// lies behind all of them.
+constexpr int PLANES_PER_CELL = 3;
+struct CellPlanes { CellPlane planes[PLANES_PER_CELL]; };
+void addPlane(CellPlanes* cell, CellPlane plane) {
+    for (auto& existing : cell->planes) {
+        if (existing.nx == 0 && existing.ny == 0 && existing.nz == 0) {
+            existing = plane;
+            return;
+        }
+        if (existing.nx * plane.nx + existing.ny * plane.ny + existing.nz * plane.nz > 0.9f) return; // already have this facing
+    }
+}
+
 // Answers to "what is in this cell": open air, solid, or scenery passing through it.
 // A surface cell also says how far up the cell its floor is (3..255 = 0..1), or that it
 // has none (a wall or ceiling runs through it).
@@ -328,14 +343,14 @@ void publishDigHit() {
 // with blocks only where the answer is solid, and treats cells with scenery through
 // them as solid until they are dug too. Scenery is a hollow shell, so "solid" means no
 // surface runs through the cell and there is no floor anywhere beneath it.
-uint8_t classify(int cx, int cy, int cz, CellPlane* plane) {
+uint8_t classify(int cx, int cy, int cz, CellPlanes* planes) {
     const float lo = 2, hi = SCALE - 2;
-    *plane = {};
+    *planes = {};
     Vec3f base{ cx * SCALE, cy * SCALE, cz * SCALE };
     bool crossed = false;
     // A 3x3 bundle of lines along each axis, so a surface that only clips a corner counts.
-    for (int axis = 0; axis < 3 && !crossed; axis++)
-        for (int i = 0; i < 9 && !crossed; i++) {
+    for (int axis = 0; axis < 3; axis++)
+        for (int i = 0; i < 9; i++) {
             float u = lo + (i % 3) * (hi - lo) / 2, v = lo + (i / 3) * (hi - lo) / 2;
             Vec3f a = base, b = base;
             if (axis == 0) a.x += lo, b.x += hi, a.y += u, b.y += u, a.z += v, b.z += v;
@@ -345,11 +360,12 @@ uint8_t classify(int cx, int cy, int cz, CellPlane* plane) {
             CollisionPoly* poly = nullptr;
             s32 bg = 0;
             // Surfaces are one-sided, so look along each line in both directions.
-            crossed = BgCheck_EntityLineTest1(&gPlayState->colCtx, &a, &b, &hit, &poly, true, true, true, true, &bg) ||
-                      BgCheck_EntityLineTest1(&gPlayState->colCtx, &b, &a, &hit, &poly, true, true, true, true, &bg);
-            if (crossed && poly) {
+            for (int pass = 0; pass < 2; pass++) {
+                if (!BgCheck_EntityLineTest1(&gPlayState->colCtx, pass ? &b : &a, pass ? &a : &b, &hit, &poly, true, true, true, true, &bg) || !poly)
+                    continue;
+                crossed = true;
                 float nx = poly->normal.x / 32767.0f, ny = poly->normal.y / 32767.0f, nz = poly->normal.z / 32767.0f;
-                *plane = { nx, ny, nz, (nx * (hit.x - base.x) + ny * (hit.y - base.y) + nz * (hit.z - base.z)) / SCALE };
+                addPlane(planes, { nx, ny, nz, (nx * (hit.x - base.x) + ny * (hit.y - base.y) + nz * (hit.z - base.z)) / SCALE });
             }
         }
     Vec3f centre{ base.x + SCALE / 2, base.y + SCALE / 2, base.z + SCALE / 2 }, top{ centre.x, base.y + SCALE - 1, centre.z };
@@ -370,7 +386,7 @@ void serviceClassify() {
     std::memcpy(&request, shared + CLASSIFY_REQUEST + 4, sizeof(request));
     if (serial != acquire(shared + CLASSIFY_REQUEST)) return;
     uint8_t classes[CLASSIFY_MAX]{};
-    CellPlane planes[CLASSIFY_MAX]{};
+    CellPlanes planes[CLASSIFY_MAX]{};
     if (request.epoch == port.epoch && request.count <= CLASSIFY_MAX) {
         CubeQueryGuard cubes;
         for (uint32_t i = 0; i < request.count; i++) {
@@ -936,7 +952,7 @@ extern "C" void CompositeCamera(Camera* c) {
     NativeCamera v{};
     if (!read(shared, CAMERA, v) || v.epoch != port.epoch || !v.valid || !std::isfinite(v.fov) || v.fov < 20 || v.fov > 150) return;
     if (!finite({ v.x, v.y, v.z, v.yaw, v.pitch })) return;
-    float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
+    float yaw = v.yaw * DEGREES, pitch = std::clamp(v.pitch, -89.9f, 89.9f) * DEGREES; // a look-at cannot face straight up or down
     if (CompositeGuest()) v.x += guestShiftX, v.z += guestShiftZ;
     c->eye = { v.x, v.y, v.z };
     c->eyeNext = c->eye;
@@ -979,7 +995,7 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     if (!finite({ v.x, v.y, v.z, v.yaw, v.pitch, v.fov })) return;
     auto& view = gPlayState->view;
     if (!view.viewingPtr || !view.projectionPtr) return;
-    const float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
+    const float yaw = v.yaw * DEGREES, pitch = std::clamp(v.pitch, -89.9f, 89.9f) * DEGREES; // a look-at cannot face straight up or down
     MtxF look{}, projection{};
     u16 norm;
     const float ex = v.x + (CompositeGuest() ? guestShiftX : 0), ez = v.z + (CompositeGuest() ? guestShiftZ : 0);

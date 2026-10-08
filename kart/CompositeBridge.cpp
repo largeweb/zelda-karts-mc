@@ -47,6 +47,21 @@ constexpr uint8_t CELL_OPEN = 0, CELL_SOLID = 1, CELL_SURFACE_NO_FLOOR = 2, CELL
 constexpr int CLASSIFY_PLANES = 5700;
 // A surface through a cell as a plane in the cell's own 0..1 coordinates; behind it is solid.
 struct CellPlane { float nx, ny, nz, d; };
+// A cell can hold more than one surface (a step's top and its face, a wall meeting a
+// floor). Up to three differently-facing ones are kept; the cell's solid part is what
+// lies behind all of them.
+constexpr int PLANES_PER_CELL = 3;
+struct CellPlanes { CellPlane planes[PLANES_PER_CELL]; };
+void addPlane(CellPlanes* cell, CellPlane plane) {
+    for (auto& existing : cell->planes) {
+        if (existing.nx == 0 && existing.ny == 0 && existing.nz == 0) {
+            existing = plane;
+            return;
+        }
+        if (existing.nx * plane.nx + existing.ny * plane.ny + existing.nz * plane.nz > 0.9f) return; // already have this facing
+    }
+}
+
 // Controls from Minecraft, and requests: a character number mounts a kart of that
 // character at the player; MOUNT and DISMOUNT get on and off the kart that is there.
 constexpr uint32_t KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_JUMP = 16, KEY_A = 1 << 19, KEY_SNEAK = 1 << 28;
@@ -264,21 +279,26 @@ void publishAim() {
     write(shared, DIG_HIT, out);
 }
 // Is a block cell open air, solid, or crossed by the track's surfaces?
-uint8_t classify(int cx, int cy, int cz, CellPlane* plane) {
-    *plane = {};
+uint8_t classify(int cx, int cy, int cz, CellPlanes* planes) {
+    *planes = {};
     const float size = UNITS_PER_BLOCK, lo = 0.05f * size, hi = size - lo;
     float bx = cx * size, by = cy * size, bz = cz * size;
     Hit hit{};
     bool crossed = false;
-    for (int axis = 0; axis < 3 && !crossed; axis++)
-        for (int i = 0; i < 9 && !crossed; i++) {
+    for (int axis = 0; axis < 3; axis++)
+        for (int i = 0; i < 9; i++) {
             float u = lo + (i % 3) * (hi - lo) / 2, v = lo + (i / 3) * (hi - lo) / 2;
             float a[3] = { bx, by, bz }, b[3] = { bx, by, bz };
             a[axis] += lo, b[axis] += hi;
             a[(axis + 1) % 3] += u, b[(axis + 1) % 3] += u;
             a[(axis + 2) % 3] += v, b[(axis + 2) % 3] += v;
-            crossed = segment(a[0], a[1], a[2], b[0], b[1], b[2], &hit, false) || segment(b[0], b[1], b[2], a[0], a[1], a[2], &hit, false);
-            if (crossed) *plane = { hit.nx, hit.ny, hit.nz, (hit.nx * (hit.x - bx) + hit.ny * (hit.y - by) + hit.nz * (hit.z - bz)) / size };
+            for (int pass = 0; pass < 2; pass++) {
+                float* from = pass ? b : a;
+                float* to = pass ? a : b;
+                if (!segment(from[0], from[1], from[2], to[0], to[1], to[2], &hit, false)) continue;
+                crossed = true;
+                addPlane(planes, { hit.nx, hit.ny, hit.nz, (hit.nx * (hit.x - bx) + hit.ny * (hit.y - by) + hit.nz * (hit.z - bz)) / size });
+            }
         }
     float mx = bx + size / 2, mz = bz + size / 2;
     if (crossed) {
@@ -294,7 +314,7 @@ void serviceClassify() {
     std::memcpy(&request, shared + CLASSIFY_REQUEST + 4, sizeof(request));
     if (serial != acquire(shared + CLASSIFY_REQUEST)) return;
     uint8_t classes[CLASSIFY_MAX]{};
-    CellPlane planes[CLASSIFY_MAX]{};
+    CellPlanes planes[CLASSIFY_MAX]{};
     if (request.epoch == port.epoch && request.count <= CLASSIFY_MAX)
         for (uint32_t i = 0; i < request.count; i++)
             classes[i] = classify(request.cells[i][0], request.cells[i][1], request.cells[i][2], &planes[i]);
@@ -489,7 +509,7 @@ extern "C" bool CompositeDriveCamera(Camera* camera, Mtx* perspective, Mtx* look
     if (!read(shared, CAMERA, v) || v.epoch != port.epoch || !v.valid || !finite({ v.x, v.y, v.z, v.yaw, v.pitch }) ||
         v.fov < 20 || v.fov > 150)
         return true;
-    float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
+    float yaw = v.yaw * DEGREES, pitch = std::clamp(v.pitch, -89.9f, 89.9f) * DEGREES; // a look-at cannot face straight up or down
     camera->pos[0] = v.x / K, camera->pos[1] = v.y / K, camera->pos[2] = v.z / K;
     camera->lookAt[0] = camera->pos[0] - std::sin(yaw) * std::cos(pitch) * 100;
     camera->lookAt[1] = camera->pos[1] - std::sin(pitch) * 100;
@@ -532,7 +552,7 @@ void CompositeLateCamera(std::unordered_map<Mtx*, MtxF>& replacements) {
     NativeCamera v{};
     if (!read(shared, CAMERA, v) || v.epoch != port.epoch || !v.valid || v.fov < 20 || v.fov > 150) return;
     if (!finite({ v.x, v.y, v.z, v.yaw, v.pitch, v.fov })) return;
-    const float yaw = v.yaw * DEGREES, pitch = v.pitch * DEGREES;
+    const float yaw = v.yaw * DEGREES, pitch = std::clamp(v.pitch, -89.9f, 89.9f) * DEGREES; // a look-at cannot face straight up or down
     const float x = v.x / K, y = v.y / K, z = v.z / K;
     MtxF look{}, projection{};
     u16 norm;

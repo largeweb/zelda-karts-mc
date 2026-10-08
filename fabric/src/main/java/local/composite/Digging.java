@@ -104,7 +104,8 @@ public final class Digging {
   var name=net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block).toString();
   var source=level.getServer().createCommandSourceStack().withSuppressedOutput();
   // Whole-number coordinates in a command mean the middle of the block; these are its corner.
-  for(double[] box:pieces(plane,2,true)){
+  // One surface needs few pieces; where surfaces meet, more are needed to follow the corner.
+  for(double[] box:pieces(plane,plane.length>4?4:2,true)){
    var command=String.format(java.util.Locale.ROOT,
     "execute in composite:zelda run summon minecraft:block_display %d.0 %d.0 %d.0 {block_state:\"%s\",brightness:{sky:15,block:0},Tags:[\"hyrule_partial\",\"%s\"],"
     +"transformation:{translation:[%.4ff,%.4ff,%.4ff],scale:[%.4ff,%.4ff,%.4ff],left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f]}}",
@@ -118,25 +119,33 @@ public final class Digging {
  }
  private static String tag(BlockPos pos){return "hp_"+pos.getX()+"_"+pos.getY()+"_"+pos.getZ();}
  /**
-  * The part of a cell behind a plane as boxes {x0,y0,z0,x1,y1,z1} in the cell's 0..1
-  * coordinates: an n by n bundle of columns along the axis the surface faces most, each
-  * filled as far as the surface. Cautious columns stop at the surface's lowest point
-  * across the column, so nothing shows through it; otherwise at its middle.
+  * The solid part of a scenery cell as boxes {x0,y0,z0,x1,y1,z1} in the cell's 0..1
+  * coordinates. The cell holds one to three surfaces (four floats each); solid is what
+  * lies behind all of them. It is built as an n by n bundle of columns along the axis
+  * the first surface faces most, each filled as far as the surfaces allow. Cautious
+  * columns stop at the lowest point across the column, so nothing shows through a
+  * surface; otherwise at its middle.
   */
- private static List<double[]> pieces(float[] plane,int n,boolean cautious){
+ private static List<double[]> pieces(float[] surfaces,int n,boolean cautious){
   var boxes=new ArrayList<double[]>();
-  int axis=Math.abs(plane[1])>=Math.abs(plane[0])&&Math.abs(plane[1])>=Math.abs(plane[2])?1:Math.abs(plane[0])>=Math.abs(plane[2])?0:2;
+  int axis=Math.abs(surfaces[1])>=Math.abs(surfaces[0])&&Math.abs(surfaces[1])>=Math.abs(surfaces[2])?1:Math.abs(surfaces[0])>=Math.abs(surfaces[2])?0:2;
   int a=axis==0?1:0,b=axis==2?1:2; // the two axes across the columns
-  for(int i=0;i<n;i++)for(int j=0;j<n;j++){
-   double u0=(double)i/n,u1=(i+1.0)/n,v0=(double)j/n,v1=(j+1.0)/n;
-   // Where the plane crosses the column: n.p = d, solved for the main axis.
-   double centre=(plane[3]-plane[a]*(u0+u1)/2-plane[b]*(v0+v1)/2)/plane[axis],cut=centre;
-   if(cautious)for(double u:new double[]{u0,u1})for(double v:new double[]{v0,v1}){
-    double corner=(plane[3]-plane[a]*u-plane[b]*v)/plane[axis];
-    cut=plane[axis]>0?Math.min(cut,corner):Math.max(cut,corner);
+  for(int i=0;i<n;i++)columns:for(int j=0;j<n;j++){
+   double u0=(double)i/n,u1=(i+1.0)/n,v0=(double)j/n,v1=(j+1.0)/n,from=0,to=1;
+   for(int k=0;k<surfaces.length;k+=4){
+    double along=surfaces[k+axis],d=surfaces[k+3];
+    // How far the rest of the plane's equation swings across this column's cross-section.
+    double low=Double.MAX_VALUE,high=-Double.MAX_VALUE;
+    for(double u:cautious?new double[]{u0,u1}:new double[]{(u0+u1)/2})for(double v:cautious?new double[]{v0,v1}:new double[]{(v0+v1)/2}){
+     double rest=surfaces[k+a]*u+surfaces[k+b]*v;low=Math.min(low,rest);high=Math.max(high,rest);
+    }
+    if(Math.abs(along)<.05){
+     // The surface runs along the column: the whole column is either behind it or not.
+     if(high>d+1e-3)continue columns;
+    }else if(along>0)to=Math.min(to,(d-high)/along);   // solid lies below the cut
+    else from=Math.max(from,(d-high)/along);           // solid lies above it (dividing by a negative turns the bound round)
    }
-   cut=Math.clamp(cut,0,1);
-   double from=plane[axis]>0?0:cut,to=plane[axis]>0?cut:1;
+   from=Math.max(from,0);to=Math.min(to,1);
    if(to-from<.02)continue;
    double[] lo=new double[3],hi=new double[3];
    lo[axis]=from;hi[axis]=to;lo[a]=u0;hi[a]=u1;lo[b]=v0;hi[b]=v1;
@@ -315,9 +324,19 @@ public final class Digging {
     else if(answer==0)cells.putIfAbsent(p.pos().asLong(),base|OPEN);
     // Scenery runs through it; its plane says which part of the cell is solid.
     else if(cells.putIfAbsent(p.pos().asLong(),base|SURFACE|(answer<3?0:Math.max(1,answer-3))<<HEIGHT_SHIFT)==null){
-     int o=CLASSIFY_PLANES+i*16;
-     float[] plane={shm.mem.getFloat(o),shm.mem.getFloat(o+4),shm.mem.getFloat(o+8),shm.mem.getFloat(o+12)};
-     if(plane[0]!=0||plane[1]!=0||plane[2]!=0){planes.put(p.pos().asLong(),plane);partial.add(p);}
+     // Up to three surfaces through the cell, four floats each; unused ones are zero.
+     int o=CLASSIFY_PLANES+i*48,count=0;
+     float[] found=new float[12];
+     for(int k=0;k<3;k++){
+      float nx=shm.mem.getFloat(o+k*16),ny=shm.mem.getFloat(o+k*16+4),nz=shm.mem.getFloat(o+k*16+8);
+      if(nx==0&&ny==0&&nz==0)continue;
+      float d=shm.mem.getFloat(o+k*16+12);
+      // Collision is sometimes a ledge higher than what is drawn (simplified steps). A flat
+      // floor is never taken higher than the floor measured at the cell's middle.
+      if(ny>.99f&&answer>=3)d=Math.min(d,(answer-3)/252f);
+      found[count*4]=nx;found[count*4+1]=ny;found[count*4+2]=nz;found[count*4+3]=d;count++;
+     }
+     if(count>0){planes.put(p.pos().asLong(),java.util.Arrays.copyOf(found,count*4));partial.add(p);}
     }
     dirty=true;
    }
@@ -407,9 +426,14 @@ public final class Digging {
   cells.clear();planes.clear();shapes.clear();queue.clear();asked=List.of();file=path;loaded=true;mapDirty=true;dirty=false;refreshDisplays=true;
   if(!Files.isRegularFile(path))return;
   try(var in=new DataInputStream(new BufferedInputStream(Files.newInputStream(path)))){
-   if(in.readInt()!=4)return; // an earlier layout: those digs keep their blocks but lose their openings
+   int version=in.readInt();
+   if(version!=4&&version!=5)return; // an earlier layout: those digs keep their blocks but lose their openings
    for(int n=in.readInt();n>0;n--)cells.put(in.readLong(),in.readInt());
-   for(int n=in.readInt();n>0;n--)planes.put(in.readLong(),new float[]{in.readFloat(),in.readFloat(),in.readFloat(),in.readFloat()});
+   for(int n=in.readInt();n>0;n--){
+    long key=in.readLong();float[] surfaces=new float[version==4?4:in.readInt()]; // version 4 kept one surface per cell
+    for(int i=0;i<surfaces.length;i++)surfaces[i]=in.readFloat();
+    planes.put(key,surfaces);
+   }
   }catch(IOException e){System.err.println("Could not read "+path+": "+e);}
  }
  private static void save(){
@@ -417,11 +441,11 @@ public final class Digging {
   try{
    var temp=file.resolveSibling(file.getFileName()+".tmp");
    try(var out=new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(temp)))){
-    out.writeInt(4);
+    out.writeInt(5);
     var entries=new ArrayList<>(cells.entrySet());out.writeInt(entries.size());
     for(var e:entries){out.writeLong(e.getKey());out.writeInt(e.getValue());}
     var surfaces=new ArrayList<>(planes.entrySet());out.writeInt(surfaces.size());
-    for(var e:surfaces){out.writeLong(e.getKey());for(float f:e.getValue())out.writeFloat(f);}
+    for(var e:surfaces){out.writeLong(e.getKey());out.writeInt(e.getValue().length);for(float f:e.getValue())out.writeFloat(f);}
    }
    Files.move(temp,file,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
   }catch(IOException e){System.err.println("Could not save "+file+": "+e);}

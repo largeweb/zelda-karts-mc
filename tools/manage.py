@@ -160,6 +160,8 @@ def install(c):
     atomic_copy(ROOT / 'fabric/build' / JAR, mc / 'mods' / JAR)
     generated = ROOT / '.local/generated'
     shutil.copytree(generated / 'Hyrule Items', mc / 'resourcepacks/Hyrule Items', dirs_exist_ok=True)
+    # Shaders are source, not generated: always the current ones, without re-running `assets`.
+    shutil.copytree(ROOT / 'fabric/src/main/resources/assets/hyrule/shaders', mc / 'resourcepacks/Hyrule Items/assets/hyrule/shaders', dirs_exist_ok=True)
     world = mc / 'saves' / WORLD
     if world.is_dir():
         shutil.copytree(generated / 'hyrule-dimension', world / 'datapacks/hyrule-dimension', dirs_exist_ok=True)
