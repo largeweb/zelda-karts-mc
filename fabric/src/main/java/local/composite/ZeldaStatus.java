@@ -25,7 +25,7 @@ public final class ZeldaStatus {
   if(wasDead&&!dead)respawnSerial++;
   wasDead=dead;
   ByteBuffer control=Passthrough.buffer(32);
-  control.putInt(epoch).putInt(ZeldaItems.held(mc)).putInt(ageSerial).putInt(age).putInt(respawnSerial).putInt(mc.player.getAbilities().instabuild?1:0);
+  control.putInt(epoch).putInt(ZeldaItems.held(mc)).putInt(ageSerial).putInt(age).putInt(respawnSerial).putInt((mc.player.getAbilities().instabuild?1:0)|(Karts.ridingGuest()?2:0)); // 2: hidden, riding a guest's kart
   shm.publish(832,control);
  }
  private static void hurt(Minecraft mc,float amount){

@@ -174,6 +174,8 @@ def install(c):
         settings['arms'] = str(c['arms'])
     if c.get('start'):
         settings['start'] = str(c['start'])
+    if c.get('dev'):
+        settings['debug'] = True  # engines log more
     if shutil.which('hyprctl'):
         settings['arrange'] = [sys.executable, str(ROOT / 'tools/arrange.py'), '--wait']
     (config_dir / 'hyrule.json').write_text(json.dumps(settings, indent=2) + '\n')

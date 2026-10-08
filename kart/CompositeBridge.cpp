@@ -32,6 +32,9 @@ extern "C" {
 #include "common_structs.h"
 extern s32 gGamestate, gGamestateNext, gModeSelection, gPlayerCountSelection1, gCCSelection;
 extern s32 gIsHUDVisible;
+extern s32 D_8015F59C, D_8015F5A0, D_8015F5A4;
+void add_collision_triangle(Vtx* vtx1, Vtx* vtx2, Vtx* vtx3, s8 surfaceType, u16 sectionId);
+void generate_collision_grid(void);
 }
 
 namespace {
@@ -93,6 +96,10 @@ Mtx* lookAtMatrix = nullptr;
 StoryMinecraft controls{};
 CarvedGrid carvedGrid{};
 bool riding = false;
+// As a guest in another game's world (COMPOSITE_GUEST) this game draws only the kart,
+// which drives on the host's ground; there is no kart until the player asks for one.
+const bool guest = std::getenv("COMPOSITE_GUEST") != nullptr;
+bool spawned = !guest;
 uint32_t requestSeen = 0, previousKeys = 0;
 u16 previousButtons = 0;
 
@@ -131,7 +138,12 @@ bool init() {
     CVarSetInteger("gVsyncEnabled", 0);
     CVarSetInteger("gMatchRefreshRate", 0);
     CVarSetInteger("gInterpolationFPS", 60);
-    spdlog::info("[Composite] Bridge ready");
+    // A guest shows its karts and nothing of its own track, and leaves sound to the host.
+    for (const char* layer : { "gDrawSky", "gDrawTrackGeometry", "gDrawCActors", "gDrawCPPActors", "gDrawStaticMeshActors",
+                               "gDrawObjects", "gDrawTransparentTrack" })
+        CVarSetInteger(layer, guest ? 0 : 1);
+    CVarSetFloat("gGameMasterVolume", guest ? 0.0f : 1.0f);
+    spdlog::info("[Composite] Bridge ready{}", guest ? " (guest: karts only)" : "");
     return true;
 }
 
@@ -331,18 +343,119 @@ void placeKart(float x, float y, float z, float yawDegrees) {
     kart->pos[2] = kart->oldPos[2] = z;
     kart->velocity[0] = kart->velocity[1] = kart->velocity[2] = 0;
     kart->speed = 0;
-    kart->rotation[1] = (s16)((180 - yawDegrees) * (32768.0f / 180));
+    kart->rotation[1] = (s16)(int)(-yawDegrees * (32768.0f / 180)); // the game turns the other way round from Minecraft
 }
+void forgetGround(Player* kart);
 void kartRequests() {
     Control control{};
     if (!read(shared, CONTROL, control) || control.epoch != port.epoch || control.requestSerial == requestSeen) return;
     requestSeen = control.requestSerial;
     if (!live()) return;
     if (control.request == REQUEST_DISMOUNT) riding = false;
-    else {
+    else if (control.request != REQUEST_MOUNT || spawned) {
         // Bring the kart to the player unless they are getting back on where it stands.
-        if (control.request != REQUEST_MOUNT) placeKart(mc.x / K, mc.y / K, mc.z / K, mc.yaw);
+        if (control.request != REQUEST_MOUNT) {
+            placeKart(mc.x / K, mc.y / K, mc.z / K, mc.yaw);
+            forgetGround(gPlayerOne);
+            spawned = true;
+        }
         riding = true;
+    }
+}
+
+// --- as a guest: the host's ground ---------------------------------------------------
+// The host writes its scene's collision triangles to a file whenever the scene changes.
+// They replace this game's track collision, scaled to its units, so its own kart
+// physics run on the host's ground.
+std::vector<Vtx> hostCorners;
+std::vector<CollisionTriangle> hostMesh;
+std::vector<u16> hostIndices;
+uint32_t hostEpoch = 0, hostScene = 0xFFFFFFFF;
+float safe[4] = { 0, 0, 0, 0 };
+bool safeKnown = false, awaitingGround = false;
+void forgetGround(Player* kart) {
+    for (auto& tyre : kart->tyres) tyre.collisionMeshIndex = 0x1388;
+    kart->collision.meshIndexYX = kart->collision.meshIndexZY = kart->collision.meshIndexZX = 0x1388;
+}
+void loadHostGround() {
+    const char* path = std::getenv("COMPOSITE_COLLISION");
+    if (!path || port.frame % 20 != 0) return;
+    FILE* file = std::fopen(path, "rb");
+    if (!file) return;
+    struct Head { uint32_t magic, epoch, scene, count; } head{};
+    if (std::fread(&head, sizeof(head), 1, file) != 1 || head.magic != 0x434F4C31 || head.count > 60000 ||
+        (head.epoch == hostEpoch && head.scene == hostScene)) {
+        std::fclose(file);
+        return;
+    }
+    std::vector<int16_t> records(head.count * 13);
+    bool whole = std::fread(records.data(), sizeof(int16_t) * 13, head.count, file) == head.count;
+    std::fclose(file);
+    if (!whole) return;
+    hostEpoch = head.epoch, hostScene = head.scene;
+    // A new place: the kart does not come along. (One asked for as this game started is
+    // waiting for exactly this ground.)
+    bool keep = awaitingGround;
+    awaitingGround = false;
+    if (!keep) spawned = riding = safeKnown = false;
+    hostCorners.assign(head.count * 3, Vtx{});
+    hostMesh.assign(head.count + 1, CollisionTriangle{});
+    hostIndices.assign(65536, 0);
+    gCollisionMesh = hostMesh.data();
+    gCollisionIndices = hostIndices.data();
+    gCollisionMeshCount = 0;
+    gTrackMinX = gTrackMinY = gTrackMinZ = gTrackMaxX = gTrackMaxY = gTrackMaxZ = 0;
+    D_8015F59C = D_8015F5A0 = D_8015F5A4 = 0;
+    for (uint32_t i = 0; i < head.count; i++) {
+        const int16_t* r = &records[i * 13];
+        Vtx* corner = &hostCorners[i * 3];
+        for (int c = 0; c < 3; c++)
+            for (int axis = 0; axis < 3; axis++) corner[c].v.ob[axis] = (s16)std::lround(r[c * 3 + axis] / K);
+        // The host's surface materials as this game's: sand and grass slow a kart down.
+        s8 surface = r[12] == 1 ? SAND : r[12] == 0 || r[12] == 8 ? DIRT : ASPHALT;
+        u16 before = gCollisionMeshCount;
+        add_collision_triangle(&corner[0], &corner[1], &corner[2], surface, 0xFF);
+        if (gCollisionMeshCount == before) continue; // too small to matter at this scale
+        const CollisionTriangle& made = gCollisionMesh[before];
+        if (made.normalX * r[9] + made.normalY * r[10] + made.normalZ * r[11] < 0) {
+            // Wound the other way round in the host: surfaces are one-sided, so turn it over.
+            gCollisionMeshCount = before;
+            add_collision_triangle(&corner[0], &corner[2], &corner[1], surface, 0xFF);
+        }
+    }
+    gTrackMaxX += 20, gTrackMaxZ += 20, gTrackMinX -= 20, gTrackMinZ -= 20, gTrackMinY -= 20;
+    generate_collision_grid();
+    if (gPlayerOne) forgetGround(gPlayerOne);
+    if (keep && gPlayerOne) placeKart(safe[0], safe[1], safe[2], safe[3]);
+    spdlog::info("[Composite] Host scene {}: {} of {} triangles as ground, {} grid entries", head.scene, (int)gCollisionMeshCount,
+                 head.count, (int)gNumCollisionTriangles);
+}
+// Keep a guest's kart out of sight until asked for, and on the ground once it is.
+void guestKart() {
+    auto* kart = gPlayerOne;
+    // No water or pits here for the game to fish the kart out of.
+    CM_GetProps()->WaterLevel = -30000.0f;
+    if (!spawned) {
+        kart->pos[0] = kart->oldPos[0] = mc.x / K;
+        kart->pos[1] = kart->oldPos[1] = mc.y / K - 2000;
+        kart->pos[2] = kart->oldPos[2] = mc.z / K;
+        kart->velocity[0] = kart->velocity[1] = kart->velocity[2] = 0;
+        kart->speed = 0;
+        return;
+    }
+    float floor = floorUnder(kart->pos[0], kart->pos[1] + BLOCK, kart->pos[2]);
+    if (std::getenv("COMPOSITE_DEBUG") && port.frame % 6 == 0)
+        spdlog::info("[Composite] kart pos {:.1f} {:.1f} {:.1f} floor {:.1f} speed {:.2f} type {:x} effects {:x} lakitu {:x} oob {:x} surface {} tyre {} keys {:x}",
+                     kart->pos[0], kart->pos[1], kart->pos[2], floor, kart->speed, (int)kart->type, (int)kart->effects, (int)kart->lakituProps,
+                     (int)kart->oobProps, (int)kart->surfaceType, (int)kart->tyres[0].collisionMeshIndex, controls.controls);
+    if (floor > -31000 && kart->pos[1] - floor < 2 * BLOCK) {
+        safe[0] = kart->pos[0], safe[1] = floor, safe[2] = kart->pos[2], safe[3] = -kart->rotation[1] * (180.0f / 32768);
+        safeKnown = true;
+    } else if (safeKnown && (kart->pos[1] < safe[1] - 30 * BLOCK || (floor < -31000 && kart->pos[1] < safe[1] - 3 * BLOCK))) {
+        // Driven off the edge of the world, or slipped under its floor (ground is
+        // one-sided): back to the last ground it stood on.
+        placeKart(safe[0], safe[1], safe[2], safe[3]);
+        forgetGround(kart);
     }
 }
 
@@ -382,7 +495,7 @@ void publish() {
     StoryPort story{};
     // While riding, the kart carries the player: Minecraft follows it and hides its own body.
     story.flags = 1 | (riding ? FLAG_RIDING : 0);
-    story.yaw = 180 - gPlayerOne->rotation[1] * (180.0f / 32768);
+    story.yaw = -gPlayerOne->rotation[1] * (180.0f / 32768);
     std::memset(story.items, 255, sizeof(story.items));
     write(shared, STORY_PORT, story);
     // The player is an ordinary Minecraft-sized body here.
@@ -426,10 +539,13 @@ extern "C" void CompositeTick() {
         float at[4];
         const char* kartAt = std::getenv("COMPOSITE_KART_AT");
         riding = false;
+        hostScene = 0xFFFFFFFF; // the track has just loaded its own collision over the host's
         if (kartAt && std::sscanf(kartAt, "%f,%f,%f,%f", &at[0], &at[1], &at[2], &at[3]) == 4) {
             placeKart(at[0] / K, at[1] / K, at[2] / K, at[3]);
             port.x = at[0], port.y = at[1], port.z = at[2];
-            riding = true;
+            riding = spawned = true;
+            safe[0] = at[0] / K, safe[1] = at[1] / K, safe[2] = at[2] / K, safe[3] = at[3];
+            safeKnown = awaitingGround = true;
         }
         mc = {};
         controls = {};
@@ -451,11 +567,13 @@ extern "C" void CompositeTick() {
         if (read(shared, STORY_MC, next) && next.epoch == port.epoch) controls = next;
         uint32_t keys = live() ? controls.controls : 0, pressed = keys & ~previousKeys;
         previousKeys = keys;
+        if (guest) loadHostGround();
         kartRequests();
         // Sneak gets off; using the kart with an empty hand from beside it gets on.
         if (riding && (pressed & KEY_SNEAK)) riding = false;
         float kx = gPlayerOne->pos[0] - mc.x / K, kz = gPlayerOne->pos[2] - mc.z / K;
-        if (!riding && (pressed & KEY_A) && kx * kx + kz * kz < 9 * BLOCK * BLOCK) riding = true;
+        if (!riding && spawned && (pressed & KEY_A) && kx * kx + kz * kz < 9 * BLOCK * BLOCK) riding = true;
+        if (guest) guestKart();
         if (riding) {
             port.x = gPlayerOne->pos[0] * K;
             port.y = (gPlayerOne->pos[1] - gPlayerOne->boundingBoxSize) * K;

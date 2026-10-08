@@ -119,7 +119,7 @@ public final class WorldFrame {
    color.blitAndBlendToTexture(target.getColorTextureView(),null);encoder.clearDepthTexture(target.getDepthTexture(),0.0);
   }
   encoder.submit();
-  Guest.draw();
+  Guest.drawAll();
   return true;
  }
 }

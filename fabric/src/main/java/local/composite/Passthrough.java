@@ -63,6 +63,9 @@ public final class Passthrough {
   }
   NativeAvatar.tick(mc,shm,epoch,state);
   if(locked){player.setPos(p.getFloat(20)/SCALE+origin(),BASE+p.getFloat(24)/SCALE,p.getFloat(28)/SCALE);player.setDeltaMovement(Vec3.ZERO);}
+  // In a guest kart the kart carries the player, as the host game does when it has them.
+  boolean carried=Karts.ridingGuest();
+  if(carried){locked=true;player.setPos(Guest.KART.x()/SCALE+origin(),BASE+Guest.KART.y()/SCALE,Guest.KART.z()/SCALE);player.setDeltaMovement(Vec3.ZERO);}
   mc.options.pauseOnLostFocus=false;
   // Until the source has a matching bob transform, keep world registration stable.
   mc.options.bobView().set(false);
@@ -85,6 +88,7 @@ public final class Passthrough {
    if(InputConstants.isKeyDown(InputConstants.KEY_LEFT))buttons|=1<<25;if(InputConstants.isKeyDown(InputConstants.KEY_RIGHT))buttons|=1<<26;
   }
   lastGuiOpen=guiOpen;
+  int held=buttons; // before any are kept back from the host
   int pressed=buttons&~lastButtons;lastButtons=buttons;
   // The collision RPC can advance a tick after vanilla evaluated its jump edge.
   // Retry vanilla's own glide transition after ground state has been resolved.
@@ -115,10 +119,13 @@ public final class Passthrough {
   if(!ZeldaItems.holding(mc)||guiOpen)buttons&=~(32|128);
   buttons|=NativeButtons.poll(mc);
   if(!guiOpen&&InputConstants.isKeyDown(InputConstants.KEY_LALT))buttons|=1<<18;
+  if(carried)buttons=0; // the keys are driving the kart
   ZeldaStatus.tick(mc,shm,epoch);
   ByteBuffer response=buffer(60);response.putInt(epoch).putInt(buttons).putInt(player.getInventory().getSelectedSlot()).putInt(mc.gui.screen()!=null?1:0).putInt(mc.options.getCameraType().ordinal());for(int i=0;i<9;i++)response.putInt(254);response.putInt(0);shm.publish(768,response);
   // Link as a guest (on a kart track): hand the same state to the second engine. Riding hides him.
-  if(Engine.hasGuest())Guest.tick(shm,(state.getInt(0)&8)!=0);
+  if(Engine.hasGuest())Guest.LINK.tick(shm,(state.getInt(0)&8)!=0,buttons);
+  // A kart as a guest (in a Zelda world): it gets the real keys.
+  if(Engine.hasKart())Guest.KART.tick(shm,false,held|(buttons&(1<<19))); // and the empty-hand use that gets back on
  }
  public static boolean move(LocalPlayer player,Vec3 desired){
   if(!active())return false;if(locked)return true;

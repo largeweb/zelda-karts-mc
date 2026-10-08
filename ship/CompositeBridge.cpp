@@ -10,6 +10,8 @@
 #include <SDL2/SDL.h>
 #include <libultraship/libultraship.h>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <cstdio>
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
@@ -180,10 +182,45 @@ void stop() {
     blocks = {};
     instrumentInput.store(0, std::memory_order_release);
 }
+// The scene's own collision, written beside the shared memory for a guest game whose
+// vehicles drive on this ground (Mario Kart's karts). One record per triangle: three
+// corners, the facing, and what the surface is made of.
+void exportCollision() {
+    static const bool guest = std::getenv("COMPOSITE_GUEST") != nullptr;
+    const char* base = std::getenv("COMPOSITE_SHM");
+    auto* header = gPlayState->colCtx.colHeader;
+    if (guest || !base || !header || !header->polyList || !header->vtxList) return;
+    struct Head { uint32_t magic, epoch, scene, count; } head{ 0x434F4C31, port.epoch, (uint32_t)gPlayState->sceneNum, 0 };
+    std::vector<int16_t> records;
+    records.reserve(header->numPolygons * 13);
+    for (int i = 0; i < header->numPolygons; i++) {
+        CollisionPoly* poly = &header->polyList[i];
+        int corners[3] = { COLPOLY_VTX_INDEX(poly->flags_vIA), COLPOLY_VTX_INDEX(poly->flags_vIB), COLPOLY_VTX_INDEX(poly->vIC) };
+        if (corners[0] >= header->numVertices || corners[1] >= header->numVertices || corners[2] >= header->numVertices) continue;
+        for (int corner : corners) {
+            records.push_back(header->vtxList[corner].x);
+            records.push_back(header->vtxList[corner].y);
+            records.push_back(header->vtxList[corner].z);
+        }
+        records.push_back(poly->normal.x);
+        records.push_back(poly->normal.y);
+        records.push_back(poly->normal.z);
+        records.push_back((int16_t)func_80041F10(&gPlayState->colCtx, poly, BGCHECK_SCENE));
+        head.count++;
+    }
+    std::string path = std::string(base) + ".collision", temporary = path + ".tmp";
+    FILE* file = std::fopen(temporary.c_str(), "wb");
+    if (!file) return;
+    std::fwrite(&head, sizeof(head), 1, file);
+    std::fwrite(records.data(), sizeof(int16_t), records.size(), file);
+    std::fclose(file);
+    std::rename(temporary.c_str(), path.c_str()); // readers only ever see a whole file
+}
 void start() {
     if (!world()) return;
     auto* p = link();
     port.epoch++;
+    exportCollision();
     port.active = 2;
     port.x = p->actor.world.pos.x;
     port.y = p->actor.world.pos.y;

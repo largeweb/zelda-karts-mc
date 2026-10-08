@@ -42,6 +42,16 @@ left). It steps through the games that are installed:
   character's kart: W accelerate, S brake, A/D steer, Space hop and drift, Shift
   get off; right-click beside a parked kart with an empty hand to get back on.
 
+- **Karts in Hyrule.** With both games installed, `/spawnkart` also works in every
+  area of an Ocarina of Time world. The Mario Kart engine is started alongside on
+  first use (a few seconds), draws only the kart, and runs its own kart physics on
+  Zelda's ground, which the Zelda engine hands it as collision triangles each time
+  an area loads. Link is hidden while you drive. Leaving an area leaves the kart
+  behind; `/spawnkart` again brings one to you. Known limits: karts ignore
+  Minecraft blocks and dug holes, moving platforms and doors are not solid to
+  them, small steps can be driven through (the kart is put back if it ends up
+  under the floor), and the kart is silent.
+
 Games that are not installed are listed in the button's tooltip with the reason.
 GoldenEye is listed but not supported yet.
 

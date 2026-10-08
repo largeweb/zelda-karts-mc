@@ -17,7 +17,7 @@ public final class NativeAvatar {
  private static int epoch;
  private static volatile boolean ownBody=true;
  /** Whether the native game draws the player; if not, Minecraft's own player model is shown. */
- public static boolean drawnByGame(Entity entity){return owns(entity)&&(ownBody||Guest.active());}
+ public static boolean drawnByGame(Entity entity){return owns(entity)&&(ownBody||Guest.LINK.active());}
  public static boolean owns(Entity entity){return Passthrough.active()&&entity instanceof Player&&entity.getUUID().equals(owner);}
  public static EntityDimensions dimensions(Entity entity,Pose pose){
   if(!owns(entity))return null;

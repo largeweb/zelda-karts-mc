@@ -10,7 +10,36 @@ import net.minecraft.world.level.storage.LevelResource;
  * Minecraft world runs no engine and plays as normal Minecraft.
  */
 public final class Engine {
- private static Process process,guest;private static Path world;
+ private static Process process,guest,kart;private static Path world;
+ /** Whether the Mario Kart engine is running as a guest, for karts in a Zelda world. */
+ public static boolean hasKart(){return kart!=null&&kart.isAlive();}
+ /** The Mario Kart engine, if it is installed: any of its tracks will do to find it. */
+ public static Games.Game kartGame(){
+  for(var candidate:Games.ALL)if("mk64".equals(candidate.family())&&candidate.available())return candidate;
+  return null;
+ }
+ /**
+  * Start (or restart) the Mario Kart engine as a guest of the open Zelda world. It
+  * draws only a kart and drives it over Zelda's ground. Started on demand, so worlds
+  * where no kart is ever asked for run two programs, not three.
+  */
+ public static void startKart(java.util.Map<String,String> settings)throws Exception{
+  var karts=kartGame();if(karts==null||world==null)return;
+  stop(kart);kart=null;
+  var runtime=karts.runtime();var shm=System.getProperty("composite.shm");
+  var builder=new ProcessBuilder(runtime.resolve(karts.engine()).toString()).directory(runtime.toFile());
+  var env=builder.environment();
+  env.put("SHIP_HOME",runtime.toString());env.put("SDL_VIDEODRIVER","x11");
+  env.put("COMPOSITE_SHM",shm+Guest.KART.suffix);env.put("COMPOSITE_FRAME",shm+Guest.KART.suffix+".rgba");
+  env.put("COMPOSITE_GUEST","1");env.put("COMPOSITE_COLLISION",shm+".collision");
+  env.put("COMPOSITE_TRACK",karts.map()); // any track: only its kart is used
+  env.putAll(settings);
+  if(Games.config().has("debug"))env.put("COMPOSITE_DEBUG","1");
+  builder.redirectErrorStream(true).redirectOutput(new File(world.toFile(),"kart-engine.log"));
+  Guest.KART.reset();
+  kart=builder.start();
+  arrange();
+ }
  /** Whether a second Zelda engine is drawing Link over the host game. */
  public static boolean hasGuest(){return guest!=null&&guest.isAlive();}
  private static Games.Game game;private static java.util.Map<String,String> extra=java.util.Map.of();
@@ -82,13 +111,16 @@ public final class Engine {
    var second=new ProcessBuilder(zelda.resolve(Games.OCARINA.engine()).toString()).directory(zelda.toFile());
    var guestEnv=second.environment();
    guestEnv.put("SHIP_HOME",guestHome.toString());guestEnv.put("SDL_VIDEODRIVER","x11");
-   guestEnv.put("COMPOSITE_SHM",shm+Guest.SUFFIX);guestEnv.put("COMPOSITE_FRAME",shm+Guest.SUFFIX+".rgba");
+   guestEnv.put("COMPOSITE_SHM",shm+Guest.LINK.suffix);guestEnv.put("COMPOSITE_FRAME",shm+Guest.LINK.suffix+".rgba");
    guestEnv.put("COMPOSITE_GUEST","1");guestEnv.put("COMPOSITE_START","0xEE"); // Kokiri Forest for its even daylight, cleared of everything but Link
    second.redirectErrorStream(true).redirectOutput(new File(world.toFile(),"guest-engine.log"));
-   Guest.reset();
+   Guest.LINK.reset();
    guest=second.start();
   }
-  // Optional helper that parks the engine's window out of the way (desktop specific).
+  arrange();
+ }
+ /** Optional helper that parks the engines' windows out of the way (desktop specific). */
+ private static void arrange()throws java.io.IOException{
   var arrange=Games.config().get("arrange");
   if(arrange!=null){
    var command=new java.util.ArrayList<String>();for(var part:arrange.getAsJsonArray())command.add(part.getAsString());
@@ -100,14 +132,15 @@ public final class Engine {
  /** Messages wait until the player is in the world to read them. */
  public static void report(Minecraft mc){if(pending!=null&&mc.player!=null){mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal(pending));pending=null;}}
  public static synchronized void stop(){
-  for(var running:new Process[]{process,guest}){
-   if(running==null||!running.isAlive())continue;
-   running.destroy();
-   try{
-    // The engine saves as it goes; it can hang in teardown after releasing everything.
-    if(!running.waitFor(4,TimeUnit.SECONDS))running.destroyForcibly();
-   }catch(InterruptedException e){running.destroyForcibly();}
-  }
-  process=null;guest=null;
+  for(var running:new Process[]{process,guest,kart})stop(running);
+  process=null;guest=null;kart=null;Karts.reset();
+ }
+ private static void stop(Process running){
+  if(running==null||!running.isAlive())return;
+  running.destroy();
+  try{
+   // The engine saves as it goes; it can hang in teardown after releasing everything.
+   if(!running.waitFor(4,TimeUnit.SECONDS))running.destroyForcibly();
+  }catch(InterruptedException e){running.destroyForcibly();}
  }
 }

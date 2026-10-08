@@ -48,13 +48,16 @@ public final class Guide {
    "Hyrule's original ground or wall, or the dirt or stone that was behind it.",
    "Any hoe works. A hoe does nothing to blocks placed anywhere else.")),
   new Page("Mario Kart tracks and karts",List.of(
-   "A Mario Kart 64 world puts you on that track on foot, as your Minecraft self.",
+   "A Mario Kart 64 world puts you on that track on foot, as Link if Zelda is installed.",
    "You can place blocks and dig into the track just as in Hyrule.",
    "/spawnkart asks which character, 1 to 8; type the number in chat. Anything else cancels.",
    "/spawnkart 3 skips the question. Each character has one kart; there are no bikes.",
    "Driving: W accelerate, S brake, A and D steer, Space hop and drift, Shift get off.",
    "Right click with an empty hand beside a parked kart to get back on.",
-   "Picking a different character reloads the track for a moment.")),
+   "Picking a different character reloads the track for a moment.",
+   "Karts also work everywhere in Hyrule if Mario Kart 64 is installed: /spawnkart there",
+   "starts the kart game alongside (a few seconds) and the kart drives on Zelda's ground.",
+   "Leaving an area leaves the kart behind; /spawnkart again brings one to you.")),
   new Page("Worlds and saving",List.of(
    "Create New World has a Map button: plain Minecraft, Ocarina of Time, or a Mario Kart 64 track.",
    "An Ocarina of Time world has its own Zelda save and starts Zelda when you open it.",
