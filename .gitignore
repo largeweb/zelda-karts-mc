@@ -6,6 +6,8 @@ local.*.json
 .env*
 /build/
 fabric/build/
+server/plugin/build/
+/dist/
 tests/build/
 ship/DirtTexture.h
 __pycache__/

@@ -66,10 +66,12 @@ public final class Dev {
     write("result.json",answer);mc.stop();return;
    }else if(q.has("zelda")){
     var key=q.get("zelda").getAsString();var server=mc.getSingleplayerServer();var uuid=mc.player.getUUID();
-    for(var entry:ZeldaItems.ALL)if(entry.key().equals(key))server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.getInventory().add(ZeldaItems.stack(entry));});
+    if(server==null)mc.getConnection().sendCommand("zelda "+key);
+    else for(var entry:ZeldaItems.ALL)if(entry.key().equals(key))server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.getInventory().add(ZeldaItems.stack(entry));});
    }else if(q.has("command")){
     var server=mc.getSingleplayerServer();
     if(server!=null)server.execute(()->server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),q.get("command").getAsString()));
+    else if(mc.getConnection()!=null)mc.getConnection().sendCommand(q.get("command").getAsString()); // on a server: as the player
    }
    write("result.json",answer);
   }catch(Exception e){System.err.println("Dev channel: "+e);}

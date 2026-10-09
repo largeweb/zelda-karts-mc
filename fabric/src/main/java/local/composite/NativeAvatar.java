@@ -34,7 +34,7 @@ public final class NativeAvatar {
    float r=avatar.getFloat(8),h=avatar.getFloat(12),e=avatar.getFloat(16);
    if(Float.isFinite(r)&&Float.isFinite(h)&&Float.isFinite(e)&&r>=5&&r<=40&&h>=12&&h<=120&&e>0&&e<=h){
     if(newPlayer||radius!=r||height!=h||eye!=e){radius=r;height=h;eye=e;mc.player.refreshDimensions();var uuid=owner;var server=mc.getSingleplayerServer();
-     server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.refreshDimensions();});}
+     if(server!=null)server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.refreshDimensions();});}
    }
   }
  }

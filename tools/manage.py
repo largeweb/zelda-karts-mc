@@ -311,7 +311,7 @@ def configure_window(c):
     path.write_text(json.dumps(data, indent=2) + '\n')
 
 
-def start(c):
+def start(c, server=None):
     live = sessions(c)
     if live:
         print('Already running:', ', '.join(live.values()), '- use restart for a clean pair.')
@@ -333,19 +333,26 @@ def start(c):
     logs.mkdir(parents=True, exist_ok=True)
     # Minecraft starts the game engine itself when a world made from that game is opened.
     with (logs / 'player.log').open('w') as log:
-        player = subprocess.Popen([c['prism_command'], '--dir', c['prism_dir'], '--launch', c['instance']],
-                                  stdout=log, stderr=log, start_new_session=True)
+        command = [c['prism_command'], '--dir', c['prism_dir'], '--launch', c['instance']]
+        if server:
+            command += ['--server', server]  # straight into that server instead of the title screen
+        player = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
     time.sleep(1)
     if player.poll() not in (None, 0):
         raise RuntimeError('Prism exited with an error; see .local/logs/player.log')
-    print('Minecraft started. Open or create a world; an Ocarina of Time world starts Zelda with it.')
+    print('Minecraft started, joining ' + server + '.' if server else
+          'Minecraft started. Open or create a world; an Ocarina of Time world starts Zelda with it.')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='cmd', required=True)
-    for name in ('fetch-source', 'build-fabric', 'assets', 'setup', 'install', 'doctor', 'start', 'stop', 'restart', 'status', 'arrange', 'save-patch', 'audit'):
+    for name in ('fetch-source', 'build-fabric', 'assets', 'setup', 'install', 'doctor', 'stop', 'status', 'arrange', 'save-patch', 'audit'):
         sub.add_parser(name)
+    for name in ('start', 'restart'):
+        launch = sub.add_parser(name)
+        launch.add_argument('--multiplayer', nargs='?', const='localhost', metavar='ADDRESS',
+                            help='join a server (default: the local one) instead of opening single player')
     b = sub.add_parser('build')
     b.add_argument('--jobs', type=int, default=min(16, os.cpu_count() or 2))
     m = sub.add_parser('mk64')
@@ -353,8 +360,12 @@ def main():
     m.add_argument('--jobs', type=int, default=min(16, os.cpu_count() or 2))
     e = sub.add_parser('extract')
     e.add_argument('rom', help='path to your own supported Ocarina of Time ROM dump')
+    sv = sub.add_parser('server', help='the multiplayer server: setup, start, stop, status, console, log, bundle')
+    sv.add_argument('rest', nargs=argparse.REMAINDER)
     a = parser.parse_args()
     c = config()
+    if a.cmd == 'server':
+        sys.exit(subprocess.call([sys.executable, str(ROOT / 'tools/server.py'), *a.rest]))
     if a.cmd == 'fetch-source':
         fetch(c)
     elif a.cmd == 'build':
@@ -402,7 +413,7 @@ def main():
             if a.cmd in ('stop', 'restart'):
                 stop(c)
             if a.cmd in ('start', 'restart'):
-                start(c)
+                start(c, getattr(a, 'multiplayer', None))
 
 
 if __name__ == '__main__':

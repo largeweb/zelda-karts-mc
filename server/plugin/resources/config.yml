@@ -1,0 +1,18 @@
+# Where things are in the Hyrule world. Hyrule's areas lie side by side, 1024 blocks
+# apart: an area is centred on x = 1024 * its Zelda scene number and reaches about 500
+# blocks either way; height 1024 is Zelda's zero.
+hub:           # Kokiri Forest: players arrive here; nothing can be built or broken
+  scene: 85
+  x: 87038.5
+  y: 1022.0
+  z: 23.5
+  yaw: -140
+field:         # /field
+  x: 82943.75
+  y: 1024.0
+  z: 33.0
+  yaw: 180
+# Players without the Hyrule mod see only an empty sky. They are told how to get it
+# and disconnected after this many seconds; 0 lets them stay.
+require-mod-seconds: 45
+mod-missing-message: "This server needs the Hyrule Composite mod and your own Ocarina of Time ROM. See the server's website for setup."

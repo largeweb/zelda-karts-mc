@@ -1,0 +1,37 @@
+name: HyruleServer
+version: '0.2'
+main: local.hyrule.HyrulePlugin
+api-version: '1.21'
+description: Server side of the Minecraft x Ocarina of Time composite. Hub, rules for the Hyrule world, and what the client mod asks of the server.
+commands:
+  hyrule:
+    description: Used by the Hyrule client mod; "/hyrule reload" re-reads the settings.
+    usage: /hyrule reload
+  zelda:
+    description: Gives an Ocarina of Time item, or all of them.
+    usage: /zelda <item|all>
+    permission: hyrule.items
+  hub:
+    description: Returns to Kokiri Forest, the hub.
+    permission: hyrule.hub
+  field:
+    description: Goes to Hyrule Field.
+    permission: hyrule.field
+  link:
+    description: /link adult or /link child (answered by the Hyrule mod).
+  spawnkart:
+    description: Brings a kart, in creative mode (answered by the Hyrule mod).
+  guide:
+    description: The Hyrule guide (answered by the Hyrule mod).
+permissions:
+  hyrule.items:
+    default: true
+  hyrule.hub:
+    default: true
+  hyrule.field:
+    default: true
+  hyrule.hub.build:
+    description: Build and break in the hub.
+    default: op
+  hyrule.admin:
+    default: op

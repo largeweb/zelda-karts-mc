@@ -50,9 +50,11 @@ public final class Passthrough {
  static ByteBuffer buffer(int n){return ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN);}
  public static void tick(Minecraft mc,ByteBuffer p,Shared shm){
   if(!ENABLED)return;shared=shm;heartbeat=System.nanoTime();
-  var player=mc.player;var server=mc.getSingleplayerServer();if(player==null||server==null)return;
+  var player=mc.player;var server=mc.getSingleplayerServer();if(player==null||(server==null&&!Remote.inHyrule()))return;
   var state=shm.snapshot(512,100);if(state==null)return;
   locked=(state.getInt(0)&14)!=0;aiming=(state.getInt(0)&32)!=0;
+  // On a server a new player entity in the same area (after dying) stands where the server put it.
+  if(server==null&&attachedPlayer!=player&&epoch==p.getInt(0)&&scene==p.getInt(48)){attachedPlayer=player;astray=0;}
   if(epoch!=p.getInt(0)||scene!=p.getInt(48)||attachedPlayer!=player){
    attachedPlayer=player;
    org.lwjgl.sdl.SDLVideo.SDL_SetWindowTitle(mc.getWindow().handle(),"Minecraft x Ocarina of Time");
@@ -60,9 +62,17 @@ public final class Passthrough {
    player.setPos(p.getFloat(20)/SCALE+origin(),BASE+p.getFloat(24)/SCALE,p.getFloat(28)/SCALE);
    player.setDeltaMovement(Vec3.ZERO);player.setOnGround(true);
    player.setYRot(state.getFloat(4));player.setXRot(15);
+   if(server==null){
+    // On a server: the player is already in Hyrule there. If the server put them
+    // somewhere in this area (where they logged out, a home, a warp), that is where they stand.
+    Remote.greet();
+    if(Remote.destination!=null&&Remote.sceneAt(Remote.destination.x)==scene)player.setPos(Remote.destination);
+    Remote.destination=null;astray=0;
+   }
    var pos=player.position();var uuid=player.getUUID();
-   server.execute(()->{server.setWorldAllowCommands(true);Passthrough.calmWeather(server);var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null){var dimension=server.getLevel(NativeBlocks.DIMENSION);if(dimension!=null)sp.teleportTo(dimension,pos.x,pos.y,pos.z,Set.of(),player.getYRot(),player.getXRot(),false);else sp.sendSystemMessage(net.minecraft.network.chat.Component.literal("Hyrule dimension missing: recreate the world with ./hyrule setup."));server.getPlayerList().sendPlayerPermissionLevel(sp);server.getCommands().sendCommands(sp);}});
+   if(server!=null)server.execute(()->{server.setWorldAllowCommands(true);Passthrough.calmWeather(server);var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null){var dimension=server.getLevel(NativeBlocks.DIMENSION);if(dimension!=null)sp.teleportTo(dimension,pos.x,pos.y,pos.z,Set.of(),player.getYRot(),player.getXRot(),false);else sp.sendSystemMessage(net.minecraft.network.chat.Component.literal("Hyrule dimension missing: recreate the world with ./hyrule setup."));server.getPlayerList().sendPlayerPermissionLevel(sp);server.getCommands().sendCommands(sp);}});
   }
+  if(server==null&&relocated(mc,player))return;
   NativeAvatar.tick(mc,shm,epoch,state);
   if(locked){player.setPos(p.getFloat(20)/SCALE+origin(),BASE+p.getFloat(24)/SCALE,p.getFloat(28)/SCALE);player.setDeltaMovement(Vec3.ZERO);}
   // In a guest kart the kart carries the player, as the host game does when it has them.
@@ -138,8 +148,30 @@ public final class Passthrough {
   // A kart as a guest (in a Zelda world): it gets the real keys.
   if(Engine.hasKart())Guest.KART.tick(shm,false,held|(buttons&(1<<19))); // and the empty-hand use that gets back on
  }
+ private static int astray;private static Vec3 lastInArea;
+ /**
+  * On a server: has the server moved the player to another of Hyrule's areas (a home,
+  * a warp, the hub)? Then the engine is restarted showing that area. True while that
+  * is happening.
+  */
+ private static boolean relocated(Minecraft mc,LocalPlayer player){
+  if(scene>=1000)return false;
+  if(Remote.sceneAt(player.getX())==scene){astray=0;lastInArea=player.position();return false;}
+  if(++astray<10)return false; // the engine itself changes area a moment before the player is moved
+  astray=0;
+  var entrance=Remote.entrance(Remote.sceneAt(player.getX()));
+  if(entrance==null){
+   Remote.say("That part of Hyrule cannot be reached by teleport yet; walk in from outside.");
+   if(lastInArea!=null)player.setPos(lastInArea);
+   return false;
+  }
+  Engine.restart(Remote.startFor(player.position()));
+  return true;
+ }
  public static boolean move(LocalPlayer player,Vec3 desired){
-  if(!active())return false;if(locked)return true;
+  // On a server, before the engine is up (joining, or changing area) there is no ground yet: stay put.
+  if(!active()){if(!Remote.inHyrule())return false;player.setDeltaMovement(Vec3.ZERO);return true;}
+  if(locked)return true;
   var pos=player.position();
   shared.f(44,player.getBbHeight()*40);
   Vec3 nativeMove=((local.composite.mixin.EntityCollisionAccessor)player).composite$collide(desired);

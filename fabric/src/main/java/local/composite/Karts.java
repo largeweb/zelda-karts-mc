@@ -24,6 +24,8 @@ public final class Karts {
  private static String unavailable(){
   if(onTrack())return null;
   if(!inZelda())return NOWHERE;
+  var player=Minecraft.getInstance().player;
+  if(Remote.on()&&(player==null||!player.isCreative()))return "Karts on this server are for creative mode only.";
   return Engine.kartGame()==null?MISSING:null;
  }
  private static void say(String text){var mc=Minecraft.getInstance();if(mc.player!=null)mc.player.sendSystemMessage(Component.literal(text));}

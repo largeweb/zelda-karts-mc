@@ -30,7 +30,11 @@ public final class NativeBlocks {
   if(!mc.level.getBlockState(pos).canBeReplaced()||Vec3.atCenterOf(pos).distanceTo(mc.player.getEyePosition())>6)return true;
   if(new AABB(pos).intersects(mc.player.getBoundingBox()))return true;
   placeCooldown=4;var uuid=mc.player.getUUID();var server=mc.getSingleplayerServer();
-  if(server==null)return true;
+  if(server==null){
+   // On a server the placement goes as an ordinary click on that spot, for the server to allow or refuse.
+   if(Remote.on())mc.gameMode.useItemOn(mc.player,InteractionHand.MAIN_HAND,new BlockHitResult(new Vec3(pos.getX()+.5,pos.getY(),pos.getZ()+.5),Direction.UP,pos,false));
+   return true;
+  }
   var expected=stack.getItem();
   server.execute(()->{
    var sp=server.getPlayerList().getPlayer(uuid);if(sp==null||!sp.level().dimension().equals(DIMENSION))return;

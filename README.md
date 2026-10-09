@@ -60,6 +60,44 @@ left). It steps through the games that are installed:
   Time, no items in shops) are lifted: every item works everywhere. After a shot
   Link keeps the item raised, as in the original; switching hotbar slot lowers it.
 
+## Multiplayer server
+
+`./hyrule server setup --accept-eula` builds a server in `.local/server`: Paper for the
+pinned Minecraft version, the plugins in `server/plugins.json` (LuckPerms, VaultUnlocked,
+EssentialsX with spawn and chat, WorldEdit, WorldGuard and a factions plugin, fetched from
+Modrinth with their checksums verified) and this project's own plugin, `HyruleServer`.
+`--accept-eula` records that you accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).
+Then `./hyrule server start`, `stop`, `status`, `log`, `console <command>`, and on the
+player's side `./hyrule start --multiplayer [address]` (default: this machine).
+
+How it fits together:
+
+- The server holds blocks, players, inventories and factions. It runs no game engine
+  and needs no ROM. Every player runs their own Zelda engine, which draws Hyrule on
+  their machine and decides where the ground is; players need this mod, the built
+  engine and their own ROM. Someone without the mod is told so and disconnected.
+- Hyrule is one Minecraft dimension (`composite:zelda`); its areas lie side by side,
+  centred 1024 blocks apart. When the server moves a player to another area (`/hub`,
+  `/field`, a home, respawning) their engine restarts showing that area, which takes a
+  few seconds. Only the outdoor areas can be reached that way; interiors and dungeons
+  are entered on foot.
+- **Kokiri Forest is the hub**: players arrive and respawn there, nothing can be built
+  or broken (operators excepted, permission `hyrule.hub.build`) and nobody takes
+  damage. Everywhere else is fair game for building, claiming and fighting.
+- `/zelda all` (or `/zelda hookshot` ...) gives the Zelda items. `/spawn` is the hub.
+  `/link`, `/spawnkart` and `/guide` are answered by the mod itself.
+- **Karts are for creative mode only** on a server.
+- The server starts with its whitelist on. Operators come from `"ops"` in `local.json`;
+  add players with `./hyrule server console whitelist add NAME`.
+
+Not in multiplayer yet: digging into Hyrule's own ground and walls (blocks you place
+work normally), other players shown as Link (they appear as their Minecraft selves),
+Zelda items hurting other players, and Minecraft mobs standing on Hyrule's ground.
+
+`./hyrule server bundle` writes `dist/hyrule-server.tar.gz`: the server, plugins,
+settings and datapack without any world or player data, with a `start.sh`, ready to
+copy to a hosted machine with Java 25. Open TCP port 25565 there.
+
 Games that are not installed are listed in the button's tooltip with the reason.
 GoldenEye is listed but not supported yet.
 

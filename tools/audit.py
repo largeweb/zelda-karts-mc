@@ -5,7 +5,7 @@ import re,subprocess,sys
 root=Path(__file__).resolve().parents[1]
 files=subprocess.check_output(['git','-C',str(root),'ls-files','--stage','-z']).split(b'\0')
 errors=[];count=0
-allowed_suffix={'.py','.java','.cpp','.h','.json','.md','.txt','.patch','.sh','.fsh','.vsh'}
+allowed_suffix={'.py','.java','.cpp','.h','.json','.md','.txt','.patch','.sh','.fsh','.vsh','.yml'}
 for entry in files:
     if not entry:continue
     meta,name=entry.split(b'\t',1);path=name.decode();count+=1

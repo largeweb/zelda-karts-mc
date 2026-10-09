@@ -1,6 +1,9 @@
 # Plan
 
-Decisions recorded 2026-10-06. Nothing is built or launched yet.
+Decisions recorded 2026-10-06. Status as of 2026-10-08: single player (steps 1-5),
+Mario Kart tracks, karts in Hyrule and a first multiplayer server (step 6, in part:
+see README, "Multiplayer server") are built. The components table below is the
+original sketch; the real layout is `ship/`, `kart/`, `fabric/`, `server/`, `tools/`.
 
 ## Decided
 

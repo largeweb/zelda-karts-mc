@@ -1,0 +1,13 @@
+{
+  "comment": "Server plugins fetched from Modrinth by slug. 'version' pins a version number; null takes the newest release that lists this Minecraft version, or failing that the newest one for Paper.",
+  "plugins": [
+    {"slug": "luckperms", "version": null, "why": "permissions and ranks"},
+    {"slug": "vaultunlocked", "version": null, "why": "the economy and permission bridge other plugins expect"},
+    {"slug": "essentialsx", "version": null, "why": "homes, warps, /spawn, /tpa, kits, economy"},
+    {"slug": "essentialsx-spawn", "version": null, "why": "spawn handling for EssentialsX"},
+    {"slug": "essentialsx-chat-module", "version": null, "why": "chat formatting"},
+    {"slug": "worldedit", "version": null, "why": "building tools for staff"},
+    {"slug": "worldguard", "version": null, "why": "region protection for staff-made areas"},
+    {"slug": "pvpindex-factions", "version": null, "why": "factions: claims, power, raids"}
+  ]
+}

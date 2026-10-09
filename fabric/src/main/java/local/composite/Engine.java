@@ -55,12 +55,20 @@ public final class Engine {
  public static void tick(Minecraft mc){
   var server=mc.getSingleplayerServer();
   Path open=server==null?null:server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+  // On a server, Hyrule is the server's Zelda dimension; the engine runs from a folder of the player's own.
+  boolean remote=server==null&&Remote.inHyrule()&&mc.player!=null;
+  if(remote)open=Remote.home(mc);
+  else if(server==null)Remote.reset();
   report(mc);
   if(java.util.Objects.equals(open,world))return;
   stop();
   world=open;extra=java.util.Map.of();game=null;
   if(open==null)return;
-  var game=Games.of(open);
+  if(remote){
+   try{Files.createDirectories(open);}catch(java.io.IOException e){System.err.println("Could not create "+open+": "+e);return;}
+   extra=Remote.startFor(mc.player.position());
+  }
+  var game=remote?Games.OCARINA:Games.of(open);
   if(game==Games.MINECRAFT)return;
   if(!game.available()){tell(mc,game.title()+" is not installed: "+game.missing());return;}
   Engine.game=game;

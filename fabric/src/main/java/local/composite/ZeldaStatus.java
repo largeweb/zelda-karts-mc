@@ -22,14 +22,17 @@ public final class ZeldaStatus {
    mc.player.experienceProgress=magicMax>0?Math.clamp(status.getInt(12)/(float)magicMax,0,1):0;
   }
   boolean dead=mc.player.isDeadOrDying();
-  if(wasDead&&!dead)respawnSerial++;
+  // In single player Zelda sets Link back down in the area. On a server the server says where (the hub, a home).
+  if(wasDead&&!dead&&!Remote.on())respawnSerial++;
   wasDead=dead;
   ByteBuffer control=Passthrough.buffer(32);
   control.putInt(epoch).putInt(ZeldaItems.held(mc)).putInt(ageSerial).putInt(age).putInt(respawnSerial).putInt((mc.player.getAbilities().instabuild?1:0)|(Karts.ridingGuest()?2:0)); // 2: hidden, riding a guest's kart
   shm.publish(832,control);
  }
  private static void hurt(Minecraft mc,float amount){
-  var server=mc.getSingleplayerServer();if(server==null||amount<=0||amount>40)return;
+  var server=mc.getSingleplayerServer();
+  if(server==null&&Remote.on()&&amount>0&&amount<=40){Remote.command(String.format(java.util.Locale.ROOT,"hyrule hurt %.1f",amount));return;}
+  if(server==null||amount<=0||amount>40)return;
   var uuid=mc.player.getUUID();
   server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.hurtServer(sp.level(),sp.damageSources().generic(),amount);});
  }
