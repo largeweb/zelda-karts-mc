@@ -30,7 +30,25 @@ public final class NativeCombat {
   // Vanilla damages entities out to twice the explosion's power; 40 Zelda units per block.
   events.add(new Event(4,explosion.center(),Vec3.ZERO,explosion.radius()*2*40));
  }
+ private static final java.util.Set<Integer> seenArrows=new java.util.HashSet<>();
+ /**
+  * On a server the arrow is the server's, which knows nothing of Zelda. The player's
+  * own arrows are spotted as they appear and Zelda is told of each, as in single
+  * player; the server's arrow flies on as well, so it still counts against players.
+  */
+ private static void ownArrows(Minecraft mc){
+  if(mc.level==null||mc.player==null||!Passthrough.interactive()||!NativeBlocks.inDimension())return;
+  var present=new java.util.HashSet<Integer>();
+  for(var entity:mc.level.entitiesForRendering()){
+   if(!(entity instanceof AbstractArrow arrow))continue;
+   present.add(arrow.getId());
+   if(!seenArrows.add(arrow.getId())||arrow.tickCount>3||arrow.getOwner()!=mc.player||events.size()>=16)continue;
+   events.add(new Event(3,arrow.position(),arrow.getDeltaMovement(),1));
+  }
+  seenArrows.retainAll(present);
+ }
  public static void tick(Shared shm,int epoch){
+  if(Remote.on())ownArrows(Minecraft.getInstance());
   if(epoch!=lastEpoch){events.clear();pending=0;lastEpoch=epoch;}
   if(pending!=0&&shm.get(1472)!=pending)return;
   var e=events.poll();if(e==null)return;pending=++serial;
