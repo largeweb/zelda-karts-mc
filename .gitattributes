@@ -1,2 +1,9 @@
+# One line ending everywhere, whatever machine a file is edited on: the Linux and
+# Windows sides share these files, and mixed endings show up as whole-file conflicts.
 * text=auto eol=lf
-*.patch text eol=lf -whitespace
+# Patches must match the upstream sources byte for byte.
+*.patch text eol=lf whitespace=-trailing-space
+# Windows launch scripts are the one exception.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

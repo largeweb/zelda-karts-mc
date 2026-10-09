@@ -109,6 +109,11 @@ stay open while an Ocarina of Time world is.
 
 ## First-time setup
 
+Platform guides: [Omarchy / Arch Linux](docs/INSTALL-OMARCHY.md) (the platform this is
+developed and tested on) and [Windows 11](docs/WINDOWS.md) (not ported yet: status and
+porting notes). [CONTRIBUTING.md](CONTRIBUTING.md) has the rules for working on both
+sides without merge conflicts.
+
 `local.json` (private, ignored by Git) overrides the defaults in
 `tools/common.py`; set `prism_dir` to a Prism Launcher data directory that has
 your account and has launched Minecraft 26.3 with Fabric once.
@@ -182,7 +187,8 @@ In game, `/help` and `/help 2` … `/help 8` page through a guide to all of this
 
 - Zelda enemies and items still treat a dug floor as solid.
 - Shields, tunics and boots are not items yet; bottles and trade items neither.
-- Not yet multiplayer.
+- Multiplayer is a first version: see "Multiplayer server" for what it leaves out.
+- Linux only so far; see docs/WINDOWS.md.
 
 ## Development
 
