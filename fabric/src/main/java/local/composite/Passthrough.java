@@ -41,6 +41,8 @@ public final class Passthrough {
  /** Hyrule has its own sky; Minecraft rain and snow would also settle on blocks lining dug ground. */
  static void calmWeather(net.minecraft.server.MinecraftServer server){
   server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(),"execute in composite:zelda run weather clear 1000000");
+  // If the game engine stops, its ground goes with it and the player falls out of the world; they keep what they carry.
+  server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(),"gamerule keep_inventory true");
  }
  public static boolean restoreScenery(Minecraft mc){return Digging.restore(mc);}
  public static boolean interactive(){return active()&&!locked;}
