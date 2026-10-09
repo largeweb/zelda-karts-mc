@@ -90,6 +90,9 @@ How it fits together:
 - The server starts with its whitelist on. Operators come from `"ops"` in `local.json`;
   add players with `./hyrule server console whitelist add NAME`.
 
+If a game engine hangs or crashes (single player or server), the mod notices within
+about twelve seconds and starts it again where it was, at most once a minute.
+
 Not in multiplayer yet: digging into Hyrule's own ground and walls (blocks you place
 work normally), other players shown as Link (they appear as their Minecraft selves),
 Zelda items hurting other players, and Minecraft mobs standing on Hyrule's ground.

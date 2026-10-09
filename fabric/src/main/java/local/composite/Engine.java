@@ -60,7 +60,7 @@ public final class Engine {
   if(remote)open=Remote.home(mc);
   else if(server==null)Remote.reset();
   report(mc);
-  if(java.util.Objects.equals(open,world))return;
+  if(java.util.Objects.equals(open,world)){watch(mc);return;}
   stop();
   world=open;extra=java.util.Map.of();game=null;
   if(open==null)return;
@@ -74,6 +74,24 @@ public final class Engine {
   Engine.game=game;
   try{start(game,open);}
   catch(Exception e){System.err.println("Could not start "+game.title()+": "+e);tell(mc,"Could not start "+game.title()+": "+e.getMessage());}
+ }
+ private static long startedAt,revivedAt;
+ /**
+  * An engine that has stopped drawing (hung, or crashed) leaves the player in an empty
+  * world. It is started again where it left off; at most once a minute, so a game that
+  * cannot run does not restart for ever.
+  */
+ private static void watch(Minecraft mc){
+  if(process==null||game==null||world==null)return;
+  long now=System.nanoTime();
+  boolean dead=!process.isAlive(),silent=now-startedAt>40_000_000_000L&&Bridge.engineSilence()>12&&Bridge.engineSilence()<1e8;
+  boolean neverDrew=now-startedAt>60_000_000_000L&&Bridge.engineSilence()>=1e8;
+  if(!(dead||silent||neverDrew)||now-revivedAt<60_000_000_000L)return;
+  revivedAt=now;
+  System.err.println(game.title()+" engine "+(dead?"exited":"stopped responding")+"; starting it again");
+  tell(mc,game.title()+" stopped responding and was started again.");
+  process.destroyForcibly();
+  restart(mc.getSingleplayerServer()==null&&mc.player!=null?Remote.startFor(mc.player.position()):extra);
  }
  /**
   * The engine keeps saves and settings in its home directory, so each world gets its own
@@ -106,6 +124,7 @@ public final class Engine {
   var log=new File(world.toFile(),"engine.log");
   builder.redirectErrorStream(true).redirectOutput(log);
   process=builder.start();
+  startedAt=System.nanoTime();Bridge.engineStarting();
   // On a kart track Link comes along: a second engine that draws only him, if Zelda is installed.
   if(game.family().equals("mk64")&&Games.OCARINA.available()&&!Games.config().has("no_guest")){
    var zelda=Games.OCARINA.runtime();var guestHome=world.resolve("oot-guest");

@@ -27,6 +27,10 @@ public final class Bridge {
     private static boolean hidden, timedOut;
     private static final double Y=1024.0, SCALE=40.0;
     private static final Path PATH=Path.of(System.getProperty("composite.shm","/dev/shm/clocktown-composite-"+System.getProperty("user.name")));
+    /** How long since the game engine last finished a frame, in seconds; huge when it never has. */
+    public static double engineSilence(){return shm==null||lastFrameTime==0?1e9:(System.nanoTime()-lastFrameTime)/1e9;}
+    /** A new engine is starting: forget the old one's frames. */
+    public static void engineStarting(){lastFrameTime=0;lastFrame=-1;}
     public static void tick(Minecraft mc){
         try {
             if(shm==null){
