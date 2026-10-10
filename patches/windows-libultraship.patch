@@ -1,0 +1,94 @@
+diff --git a/src/fast/backends/gfx_sdl2.cpp b/src/fast/backends/gfx_sdl2.cpp
+index 769a4a09..5ca68aae 100644
+--- a/src/fast/backends/gfx_sdl2.cpp
++++ b/src/fast/backends/gfx_sdl2.cpp
+@@ -694,7 +694,11 @@ static uint64_t qpc_to_100ns(uint64_t qpc) {
+     return qpc / qpc_freq * _100NANOSECONDS_IN_SECOND + qpc % qpc_freq * _100NANOSECONDS_IN_SECOND / qpc_freq;
+ }
+ 
++#ifdef _WIN32
++extern "C" bool CompositePollCollision();
++#else
+ extern "C" bool CompositePollCollision() __attribute__((weak));
++#endif
+ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+     uint64_t t = qpc_to_100ns(SDL_GetPerformanceCounter());
+ 
+@@ -725,17 +729,32 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+             nanosleep(&spec, nullptr);
+         }
+ #else
+-        // The accuracy of this mTimer seems to usually be within +- 1.0 ms
+-        LARGE_INTEGER li;
+-        li.QuadPart = -left;
+-        SetWaitableTimer(mTimer, &li, 0, nullptr, nullptr, false);
+-        WaitForSingleObject(mTimer, INFINITE);
++        if (CompositePollCollision()) {
++            // Answer Minecraft's requests on this thread between 1 ms waits.
++            while ((t = qpc_to_100ns(SDL_GetPerformanceCounter())) < (uint64_t)next) {
++                CompositePollCollision();
++                const int64_t remaining = next - t;
++                LARGE_INTEGER li;
++                li.QuadPart = -std::min<int64_t>(remaining, 10000);
++                if (SetWaitableTimer(mTimer, &li, 0, nullptr, nullptr, false))
++                    WaitForSingleObject(mTimer, INFINITE);
++                else
++                    SDL_Delay(1);
++            }
++        } else {
++            // Keep upstream's pacing when running as the ordinary game.
++            LARGE_INTEGER li;
++            li.QuadPart = -left;
++            SetWaitableTimer(mTimer, &li, 0, nullptr, nullptr, false);
++            WaitForSingleObject(mTimer, INFINITE);
++        }
+ #endif
+     }
+ 
+     t = qpc_to_100ns(SDL_GetPerformanceCounter());
+ #ifdef _WIN32
+     while (t < next) {
++        CompositePollCollision();
+         YieldProcessor(); // TODO: Find a way for other compilers, OSes and architectures
+         t = qpc_to_100ns(SDL_GetPerformanceCounter());
+     }
+@@ -749,7 +768,11 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+     previous_time = t;
+ }
+ 
++#ifdef _WIN32
++extern "C" void CompositeExportFrame(SDL_Window*);
++#else
+ extern "C" void CompositeExportFrame(SDL_Window*) __attribute__((weak));
++#endif
+ void GfxWindowBackendSDL2::SwapBuffersBegin() {
+     bool nextVsyncEnabled = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
+ 
+diff --git a/src/fast/interpreter.cpp b/src/fast/interpreter.cpp
+index c9294f4c..1e32c771 100644
+--- a/src/fast/interpreter.cpp
++++ b/src/fast/interpreter.cpp
+@@ -71,7 +71,11 @@ std::stack<std::string> currentDir;
+ 
+ #define TEXTURE_CACHE_MAX_SIZE 1024
+ 
++#ifdef _WIN32
++extern "C" void CompositeFogDepth(float w, float* depth);
++#else
+ extern "C" void CompositeFogDepth(float w, float* depth) __attribute__((weak));
++#endif
+ 
+ namespace Fast {
+ 
+@@ -3339,7 +3343,11 @@ bool gfx_invalidate_tex_cache_handler_f3dex2(F3DGfx** cmd) {
+     return false;
+ }
+ 
++#ifdef _WIN32
++extern "C" void CompositeSceneDrawn();
++#else
+ extern "C" void CompositeSceneDrawn() __attribute__((weak));
++#endif
+ bool gfx_noop_handler_f3dex2(F3DGfx** cmd0) {
+     F3DGfx* cmd = *cmd0;
+     const char* filename = (const char*)(cmd)->words.w1;

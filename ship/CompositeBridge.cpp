@@ -1,6 +1,9 @@
 // Ocarina of Time side of the Minecraft bridge. Runs inside Ship of Harkinian.
 // Minecraft owns the controls, camera and player position; Zelda owns scenery,
 // actors, story and Link's body. All gameplay writes happen on the game thread.
+#ifdef _WIN32
+#include "PlatformWindows.h"
+#endif
 #include "Protocol.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -17,11 +20,13 @@
 #include <cstdlib>
 #include <unordered_map>
 #include <vector>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 extern "C" {
 #include <z64.h>
 #include "macros.h"
@@ -210,12 +215,24 @@ void exportCollision() {
         head.count++;
     }
     std::string path = std::string(base) + ".collision", temporary = path + ".tmp";
+#ifdef _WIN32
+    auto wideBase = composite::windows::environmentPath(L"COMPOSITE_SHM");
+    if (wideBase.empty()) return;
+    auto widePath = wideBase + L".collision";
+    auto wideTemporary = widePath + L".tmp";
+    FILE* file = _wfopen(wideTemporary.c_str(), L"wb");
+#else
     FILE* file = std::fopen(temporary.c_str(), "wb");
+#endif
     if (!file) return;
     std::fwrite(&head, sizeof(head), 1, file);
     std::fwrite(records.data(), sizeof(int16_t), records.size(), file);
     std::fclose(file);
+#ifdef _WIN32
+    MoveFileExW(wideTemporary.c_str(), widePath.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
     std::rename(temporary.c_str(), path.c_str()); // readers only ever see a whole file
+#endif
 }
 void start() {
     if (!world()) return;
@@ -897,6 +914,14 @@ void bootIntoGame(void* gameState) {
 void init() {
     const char* path = std::getenv("COMPOSITE_SHM");
     if (!path) return;
+#ifdef _WIN32
+    static composite::windows::Mapping transport;
+    if (!transport.openEnvironment(L"COMPOSITE_SHM", SIZE)) {
+        spdlog::error("[Composite] Shared memory already in use or unavailable");
+        std::exit(73);
+    }
+    shared = transport.data();
+#else
     int descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
     if (descriptor < 0 || flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
         spdlog::error("[Composite] Shared memory already in use or unavailable");
@@ -913,6 +938,7 @@ void init() {
         shared = nullptr;
         return;
     }
+#endif
     CVarSetInteger("gVsyncEnabled", 0);
     CVarSetInteger(CVAR_SETTING("MatchRefreshRate"), 0);
     CVarSetInteger(CVAR_SETTING("InterpolationFPS"), 60);

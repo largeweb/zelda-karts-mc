@@ -4,6 +4,9 @@
 //
 // The shared-memory layout is the one the Ocarina of Time bridge uses, and so are its
 // units: everything published here is scaled so that 40 units make one block.
+#ifdef _WIN32
+#include "PlatformWindows.h"
+#endif
 #include "Protocol.h"
 #include <SDL2/SDL.h>
 #include <libultraship/libultraship.h>
@@ -13,11 +16,13 @@
 #include <cstdlib>
 #include <unordered_map>
 #include <vector>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 #include "port/Game.h"
 #include "engine/TrackBrowser.h"
 extern "C" {
@@ -117,6 +122,15 @@ bool init() {
     if (shared) return true;
     const char* path = std::getenv("COMPOSITE_SHM");
     if (!path || failed) return false;
+#ifdef _WIN32
+    static composite::windows::Mapping transport;
+    if (!transport.openEnvironment(L"COMPOSITE_SHM", SIZE)) {
+        spdlog::error("[Composite] Shared memory unavailable or already in use");
+        failed = true;
+        return false;
+    }
+    shared = transport.data();
+#else
     int descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
     struct stat st {};
     if (descriptor < 0 || flock(descriptor, LOCK_EX | LOCK_NB) != 0 || fstat(descriptor, &st) || st.st_uid != getuid() ||
@@ -131,6 +145,7 @@ bool init() {
         return false;
     }
     shared = (uint8_t*)mapped;
+#endif
     std::memset(shared, 0, SIZE);
     release(shared, MAGIC);
     release(shared + 4, VERSION);
