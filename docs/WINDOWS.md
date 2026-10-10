@@ -1,14 +1,122 @@
 # Windows 11: status and porting notes
 
-**Status: not ported.** Nothing here has been built or run on Windows. This page is
-for whoever does that work (a person or a coding agent): what is Linux-only today,
-where the seams are, and how to work without colliding with the Linux side. Read
-`CONTRIBUTING.md` first; the rules there about branches and shared files are what
-keep the two sides mergeable.
+**Status: partial native port; isolated transport verified on Windows 11.** Neither
+game engine has been built or run here, and Minecraft composition has not been
+verified in the game. The first milestone is still incomplete. Read
+`CONTRIBUTING.md`; its branch and shared-file rules keep the sides mergeable.
 
-The Minecraft mod (`fabric/`) is plain Java and the server (`server/`, Paper) runs on
-Windows as it is. The work is in the two native bridges, the launcher tools and the
-build.
+The Minecraft mod (`fabric/`) and server (`server/`, Paper) are Java; their full
+Windows builds and gameplay have not been tested here. The platform work is in
+the native bridges, process launch, launcher tools and build.
+
+## Progress recorded 2026-10-09
+
+| Component | Builds | Runs | Verified in the game |
+|---|---|---|---|
+| Isolated native mapping test, LLVM-MinGW Clang 22.1.8 x64 | Yes | Yes | Not applicable |
+| Existing `Shared.java` with JDK 25.0.4.1 and a test peer | Yes | Yes, exchanging data with native mapping | Not applicable |
+| Ship of Harkinian with bridge | In progress; vcpkg dependencies built | No | No |
+| Full Fabric mod | Not attempted; owner must provide Prism data path | No | No |
+| SpaghettiKart / Paper multiplayer | Not attempted | No | No |
+
+Implemented:
+
+- `ship/PlatformWindows.h`: ordinary files mapped with `CreateFileW`,
+  `CreateFileMappingW` and `MapViewOfFile`. A companion `.engine-lock` file held
+  with no sharing excludes other engine writers without locking Java's transport
+  bytes. Handles live as long as the mapping; process exit releases ownership.
+  Transport handles allow read/write/delete sharing. Directory and final-component
+  reparse-point files are rejected. Use a private, user-owned transport directory.
+- All three native mapping sites select that helper under `_WIN32`. Their Linux
+  mapping code, the protocol header and all offsets are unchanged.
+- Collision export uses wide filenames and `MoveFileExW` replacement on Windows.
+  Actual collision export from the game has not been tested.
+- New `patches/windows-libultraship.patch`, generated from the pinned submodule
+  after applying the shared patch: Windows collision polling during frame waits
+  and ordinary bridge symbol declarations on Windows (ELF weak declarations remain
+  on Linux). Pacing and linking inside the engine are still unverified.
+- `tools/windows/build.py` fetches pinned source, checks both revisions, applies
+  shared patches followed by the Windows patch, copies bridge sources, and provides
+  a native-only build entry point. Repeated `prepare` was checked successfully.
+  `configure-window` selects OpenGL **backend ID 2**, confirmed in the pinned
+  `libultraship/include/fast/Fast3dWindow.h`, with a windowed 1280x720 configuration.
+
+Checks passed: native/Python two-way mapped data and seqlock bytes; duplicate
+engine rejection; owner exit/restart while a consumer retains its mapping; paths
+with spaces and Unicode through the wide environment API; 8192-byte control and
+29,491,264-byte frame files; resizing an unmapped file; retry after a failed open;
+JDK 25 `FileChannel.map` through the unchanged `Shared.java`. These are transport
+tests, not colour/depth readback or gameplay tests.
+
+Local prerequisites fetched into ignored `.local/toolchains/`: portable
+[LLVM-MinGW](https://github.com/mstorsjo/llvm-mingw/releases/tag/20260616),
+[Temurin JDK 25](https://adoptium.net/installation/ci-scripts/) (archive checksum
+verified) and CMake 4.4.4. No ROMs or Nintendo game assets were downloaded.
+On 2026-10-10 the owner authorized installing the missing prerequisites. Visual
+Studio Build Tools 2022 17.14.41, Windows SDK 10.0.26100 and ClangCL 19.1.5 are
+installed. The same native/JDK transport tests now also pass with ClangCL.
+All 21 vcpkg dependencies built successfully; the full engine configure/build is
+in progress and is not yet verified. Stock MSVC cannot compile `Protocol.h`'s
+atomic builtins, so the Windows entry point selects ClangCL instead.
+The installer requested a reboot, but compiler and transport tests worked without
+one; no reboot has been performed.
+
+On 2026-10-10 the owner supplied their ROM directory. The Ocarina of Time dump's
+SHA-1 matches **NTSC 1.2 (US)** in the pinned upstream `docs/supportedHashes.json`.
+The Mario Kart 64 dump was also located; its extraction has not been tested.
+Private filenames and hashes are recorded only in ignored `.local/windows-inputs.json`.
+Neither ROM has been copied or extracted. Prism Launcher 11.1.1 and Python 3.13
+were installed with the owner's authorization. A new private Prism data folder
+was prepared in ignored `.local/prism-windows`; existing account folders were not
+searched. Microsoft sign-in is left to the owner. GitHub CLI is installed and
+authenticated by the owner; commits use the verified account's noreply address
+in repository-local Git configuration. After the native build,
+verify the ordinary standalone game, then finish the Java executable-name/SDL
+seams and Windows mod configuration before manual composition testing. Launcher
+install/setup/start, kart builds and multiplayer remain to be ported and tested.
+
+Surprises:
+
+- Fresh submodules inherited Windows CRLF checkout settings even after configuring
+  the parent checkout. The unchanged shared patches failed to apply until the fresh
+  submodules were checked out with LF. The Windows fetch helper passes
+  `-c core.autocrlf=false` to recursive submodule fetching.
+- Passing a Unicode filename directly as a Java launcher argument on this machine
+  lost characters to the system code page. The transport test reads the filename
+  from the wide Windows environment instead, which succeeds. Unicode transport
+  through Prism's JVM argument handling is **not verified**; test it separately.
+
+## Native preparation and checks
+
+Run with Python 3 from the repository root. The original Linux `tools/manage.py`
+still imports `fcntl` and is not a Windows entry point.
+
+```powershell
+python tools/windows/build.py fetch-source   # only if .local/soh does not exist
+python tools/windows/build.py prepare
+python tools/windows/build.py doctor
+python tools/windows/build.py build --jobs 4
+```
+
+Install the C++ requirements from the pinned upstream
+[Windows build guide](https://github.com/HarbourMasters/Shipwright/blob/ecd889c2019b87e78b0a3d942a6a3fe98b7efaed/docs/BUILDING.md),
+adding the LLVM Clang tools for Windows / ClangCL component. The helper uses
+`Visual Studio 17 2022`, x64, `-T ClangCL`, and Release. Upstream CMake fetches
+code dependencies with vcpkg. `--cmake PATH` accepts an explicit CMake executable.
+The proposed output is `.local/runtime/soh-composite.exe` plus required upstream
+files; that output has not yet been produced.
+
+To reproduce the isolated checks with the portable tools fetched in this session:
+
+```powershell
+python tests/windows/test_mapping.py --compiler .local/toolchains/llvm-mingw-20260616-ucrt-x86_64/bin/clang++.exe --java-home .local/toolchains/jdk-25.0.4.1+1
+python tools/audit.py
+```
+
+`--java-home` is optional; without it only native/Python transport is tested.
+Alternatively use `--compiler clang-cl` in an x64 VS developer shell; that variant
+also passed after installing the build tools. Test binaries and classes stay in
+ignored `tests/build/`.
 
 ## What a working Windows build has to do
 
