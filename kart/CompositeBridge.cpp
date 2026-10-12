@@ -46,6 +46,9 @@ void generate_collision_grid(void);
 
 namespace {
 using namespace composite;
+#ifdef _WIN32
+using composite::SIZE;
+#endif
 
 // Mario Kart's own units per Minecraft block, and the factor to the shared 40-per-block units.
 // Six game units to the block makes a kart about a block and a half wide beside the player.

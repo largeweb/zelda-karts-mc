@@ -92,3 +92,16 @@ index c9294f4c..1e32c771 100644
  bool gfx_noop_handler_f3dex2(F3DGfx** cmd0) {
      F3DGfx* cmd = *cmd0;
      const char* filename = (const char*)(cmd)->words.w1;
+diff --git a/src/ship/Context.cpp b/src/ship/Context.cpp
+index 361a1f75..3c3dde8f 100644
+--- a/src/ship/Context.cpp
++++ b/src/ship/Context.cpp
+@@ -564,7 +564,7 @@ std::string Context::GetAppDirectoryPath(const std::string& appName) {
+     }
+ #endif
+ 
+-#if defined(__linux__)
++#if defined(__linux__) || defined(_WIN32)
+     char* fpath = std::getenv("SHIP_HOME");
+     if (fpath != NULL) {
+         return std::string(fpath);

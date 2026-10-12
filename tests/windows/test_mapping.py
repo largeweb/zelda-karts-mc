@@ -68,7 +68,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     exe = out / 'mapping.exe'
     if Path(args.compiler).stem == 'clang-cl':
-        command = [args.compiler, '/std:c++20', '/EHsc', str(ROOT / 'tests/windows/mapping.cpp'),
+        command = [args.compiler, '/std:c++20', '/EHsc', '/clang:-fno-fast-math', '/clang:-ffp-contract=off', str(ROOT / 'tests/windows/mapping.cpp'),
                    '/Fe:' + str(exe), '/Fo:' + str(out / 'mapping.obj')]
     else:
         command = [args.compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror', '-static',

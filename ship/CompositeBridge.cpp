@@ -49,6 +49,9 @@ extern "C" int CompositeGuest();
 
 namespace {
 using namespace composite;
+#ifdef _WIN32
+using composite::SIZE;
+#endif
 
 // Offsets beyond Protocol.h's legacy layout; mirrored by the Fabric mod.
 constexpr int AVATAR = 640, STATUS = 672, CONTROL = 832, FIRE = 928, CAMERA = 1280, CAMERA_QUERY = 1344, CAMERA_REPLY = 1376,

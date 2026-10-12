@@ -1,0 +1,130 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7951c1041..afa1c3aa0 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -142,8 +142,14 @@ endif()
+ # Enforce strict, deterministic IEEE-754 floating-point to match N64 (MIPS) semantics.
+ # Never enable fast-math, and disable FMA contraction: the R4300 CPU and RSP have no
+ # fused multiply-add, so contracting mul+add into an FMA produces extra precision.
+-add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-fast-math>)
+-add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
++if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
++    # clang-cl requires /clang: for these flags; bare -f flags are ignored.
++    add_compile_options(/clang:-fno-fast-math /clang:-ffp-contract=off)
++    add_compile_options(/clang:-Wno-pre-c++20-compat)
++else()
++    add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-fast-math>)
++    add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
++endif()
+ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/fp:precise>)
+ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/fp:except->)
+ 
+@@ -384,7 +390,7 @@ install(FILES "${CMAKE_BINARY_DIR}/soh/soh.o2r" DESTINATION . COMPONENT ship)
+ install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/yml/" DESTINATION assets COMPONENT ship)
+ endif()
+ 
+-if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
++if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows" AND NOT COMPOSITE_WINDOWS_EXTERNAL_ASSETS)
+ install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/yml/" DESTINATION assets COMPONENT ship)
+ endif()
+ 
+diff --git a/soh/CMakeLists.txt b/soh/CMakeLists.txt
+index f356d2148..034630fcb 100644
+--- a/soh/CMakeLists.txt
++++ b/soh/CMakeLists.txt
+@@ -482,7 +482,39 @@ if(MSVC)
+ endif()
+ 
+ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+-    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
++    if(WIN32 AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
++        # Keep Windows driver/link options. Bare -Wall is /Wall (all diagnostics)
++        # in clang-cl, and the Unix -pthread/-Wl flags do not belong here.
++        target_compile_options(${PROJECT_NAME} PRIVATE
++            /WX-
++            /clang:-Wno-unused-parameter
++            /clang:-Wno-unused-function
++            /clang:-Wno-unused-variable
++            /clang:-Wno-missing-field-initializers
++            /clang:-Wno-narrowing
++            /clang:-Wno-missing-braces
++            /clang:-Wno-deprecated-enum-enum-conversion
++        )
++        # MSBuild invokes lld-link directly, so it does not add Clang's integer
++        # runtime automatically (StormLib's 128-bit division needs __udivti3).
++        execute_process(COMMAND ${CMAKE_CXX_COMPILER}
++            /clang:--print-libgcc-file-name /clang:--rtlib=compiler-rt
++            OUTPUT_VARIABLE CLANG_BUILTINS OUTPUT_STRIP_TRAILING_WHITESPACE
++            COMMAND_ERROR_IS_FATAL ANY)
++        if(NOT EXISTS "${CLANG_BUILTINS}")
++            message(FATAL_ERROR "Clang compiler-rt builtins are missing: ${CLANG_BUILTINS}")
++        endif()
++        target_link_libraries(${PROJECT_NAME} PRIVATE "${CLANG_BUILTINS}")
++        # Visual Studio ignores target COMPILE_LANGUAGE:C options on mixed targets.
++        foreach(source IN LISTS ALL_FILES)
++            if(source MATCHES "\\.c$")
++                set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS
++                    /clang:-Wno-implicit-int
++                    /clang:-Wno-incompatible-pointer-types
++                    /clang:-Wno-int-conversion)
++            endif()
++        endforeach()
++    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+         target_compile_options(${PROJECT_NAME} PRIVATE
+             -Wall -Wextra -Wno-error
+             -Wformat-security
+@@ -598,6 +630,8 @@ endif()
+ ################################################################################
+ # Pre build events
+ ################################################################################
++# The Windows helper installs the extraction YAMLs once, in parallel.
++if(NOT (WIN32 AND COMPOSITE_WINDOWS_EXTERNAL_ASSETS))
+ if (CMAKE_GENERATOR MATCHES "Visual Studio")
+     add_custom_command(
+     TARGET ${PROJECT_NAME}
+@@ -611,6 +645,7 @@ add_custom_command(
+     COMMENT "Copying asset ymls..."
+     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/yml $<TARGET_FILE_DIR:soh>/assets
+ )
++endif()
+ ################################################################################
+ # Dependencies
+ ################################################################################
+diff --git a/soh/Resource.rc b/soh/Resource.rc
+index 59702663f..7d9f356d0 100644
+--- a/soh/Resource.rc
++++ b/soh/Resource.rc
+@@ -1,6 +1,6 @@
+ // Microsoft Visual C++ generated resource script.
+ //
+-#include <ship/resource/Resource.h>
++#include "resource.h"
+ #include "properties.h"
+ 
+ #define APSTUDIO_READONLY_SYMBOLS
+diff --git a/soh/soh/Extractor/FastCrc32C.c b/soh/soh/Extractor/FastCrc32C.c
+index fca6b97f3..51c075746 100644
+--- a/soh/soh/Extractor/FastCrc32C.c
++++ b/soh/soh/Extractor/FastCrc32C.c
+@@ -5,7 +5,9 @@
+ // Clang will define both __llvm__ and __GNUC__ but GCC will only define __GNUC__. So we need to check for __llvm__
+ // first.
+ #if ((defined(__llvm__) && (defined(__x86_64__) || defined(__i386__))))
++#ifndef _WIN32
+ #pragma clang attribute push(__attribute__((target("crc32"))), apply_to = function)
++#endif
+ #elif ((defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))))
+ // GCC Only lets you enable all of sse4.2 so we will for just this file and reset it at the end.
+ #pragma GCC push_options
+@@ -34,6 +36,11 @@
+ #define NO_CRC_INTRIN
+ #endif
+ 
++// ClangCL must not apply target attributes to Windows intrinsic header declarations.
++#if defined(_WIN32) && defined(__llvm__) && (defined(__x86_64__) || defined(__i386__))
++#pragma clang attribute push(__attribute__((target("crc32"))), apply_to = function)
++#endif
++
+ #if defined(_MSC_VER) && defined(_M_ARM64)
+ #define INTRIN_CRC32_64(crc, data) crc = (uint32_t)__crc32cd(crc, data)
+ #define INTRIN_CRC32_32(crc, data) crc = __crc32cw(crc, data)

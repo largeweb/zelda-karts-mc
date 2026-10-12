@@ -4,6 +4,7 @@
 No ROM, launcher profile or account access. Run with Python 3 from this checkout.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -53,6 +54,7 @@ def prepare():
     lus = SOURCE / 'libultraship'
     revision(lus, VERSIONS['libultraship_commit'])
     apply_patch(SOURCE, ROOT / 'patches/soh.patch')
+    apply_patch(SOURCE, ROOT / 'patches/windows-soh.patch')
     # Windows patch overlaps shared hunks. Undo it before checking the base patch,
     # then reapply, so repeated preparation remains safe and idempotent.
     windows_patch = ROOT / 'patches/windows-libultraship.patch'
@@ -79,6 +81,7 @@ def configure_window():
     window['Backend'] = {'Id': 2, 'Name': 'OpenGL'}
     cvars = data.setdefault('CVars', {})
     cvars['gVsyncEnabled'] = 0
+    cvars.setdefault('gSettings', {})['VsyncEnabled'] = 0
     RUNTIME.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + '\n')
 
@@ -125,13 +128,25 @@ def build(cmake, jobs):
     prepare()
     # ClangCL supports the protected Protocol.h atomic builtins. Stock MSVC does not.
     run(cmake, '-S', SOURCE, '-B', BUILD, '-G', 'Visual Studio 17 2022', '-T', 'ClangCL', '-A', 'x64',
-        '-DCMAKE_BUILD_TYPE=Release')
-    run(cmake, '--build', BUILD, '--config', 'Release', '--target', 'GenerateSohOtr')
-    run(cmake, '--build', BUILD, '--config', 'Release', '--parallel', jobs)
+        '-DCMAKE_BUILD_TYPE=Release', '-DCOMPOSITE_WINDOWS_EXTERNAL_ASSETS=ON')
+    run(cmake, '--build', BUILD, '--config', 'Release', '--target', 'GenerateSohOtr', '--parallel', jobs)
+    # Only the engine and its dependencies. Upstream ALL also builds an unused
+    # zlib DLL whose resource script cannot use clang-cl's stddef headers.
+    run(cmake, '--build', BUILD, '--config', 'Release', '--target', 'soh', '--parallel', jobs)
     # Upstream's install target includes required game-independent files and PDBs.
     run(cmake, '--install', BUILD, '--config', 'Release', '--component', 'ship', '--prefix', RUNTIME)
     shutil.copy2(RUNTIME / 'soh.exe', RUNTIME / 'soh-composite.exe')
-    shutil.copytree(BUILD / 'soh/Release/assets', RUNTIME / 'assets', dirs_exist_ok=True)
+    # Upstream copies the same 20,000+ small files three times, serially. Install
+    # them once here; bounded workers avoid the long per-file delay on Windows.
+    assets = SOURCE / 'soh/assets/yml'
+    def copy_asset(path):
+        destination = RUNTIME / 'assets' / path.relative_to(assets)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists() or destination.stat().st_size != path.stat().st_size or destination.stat().st_mtime_ns != path.stat().st_mtime_ns:
+            shutil.copy2(path, destination)
+    with ThreadPoolExecutor(max_workers=min(jobs, 8)) as workers:
+        for _ in workers.map(copy_asset, (path for path in assets.rglob('*') if path.is_file())):
+            pass
     configure_window()
     print('Built native engine only. No ROM extracted, Fabric mod built or game verified.')
 
