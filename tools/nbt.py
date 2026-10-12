@@ -1,8 +1,8 @@
 """Small typed NBT reader/writer for creating local world metadata (no assets)."""
 import struct,gzip,io
 
-def read(path):
- f=io.BytesIO(gzip.decompress(path.read_bytes()))
+def read(path,compressed=True):
+ data=path.read_bytes();f=io.BytesIO(gzip.decompress(data) if compressed else data)
  def number(fmt):return struct.unpack('>'+fmt,f.read(struct.calcsize(fmt)))[0]
  def string():return f.read(number('H')).decode('utf-8')
  def payload(t):
@@ -17,7 +17,7 @@ def read(path):
   if t in (7,11,12):return [number({7:'b',11:'i',12:'q'}[t]) for _ in range(number('i'))]
   raise ValueError(t)
  t=number('B');name=string();return name,(t,payload(t))
-def write(path,root,name=''):
+def write(path,root,name='',compressed=True):
  f=io.BytesIO()
  def number(fmt,v):f.write(struct.pack('>'+fmt,v))
  def string(v):b=v.encode('utf-8');number('H',len(b));f.write(b)
@@ -34,4 +34,4 @@ def write(path,root,name=''):
    number('i',len(v))
    for item in v:number({7:'b',11:'i',12:'q'}[t],item)
   else:raise ValueError(t)
- number('B',root[0]);string(name);payload(*root);path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(gzip.compress(f.getvalue(),mtime=0))
+ number('B',root[0]);string(name);payload(*root);path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(gzip.compress(f.getvalue(),mtime=0) if compressed else f.getvalue())

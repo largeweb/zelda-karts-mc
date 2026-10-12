@@ -179,6 +179,9 @@ def install(c):
     if shutil.which('hyprctl'):
         settings['arrange'] = [sys.executable, str(ROOT / 'tools/arrange.py'), '--wait']
     (config_dir / 'hyrule.json').write_text(json.dumps(settings, indent=2) + '\n')
+    # The local server appears in the multiplayer list; "servers" in local.json adds others ({"name": ..., "address": ...}).
+    for server in [{'name': 'Hyrule (this machine)', 'address': 'localhost'}] + c.get('servers', []):
+        list_server(c, server['name'], server['address'])
     if world.is_dir() and not (world / 'hyrule-world.json').exists():
         (world / 'hyrule-world.json').write_text(json.dumps({'game': 'oot'}))
     options = mc / 'options.txt'
@@ -197,6 +200,29 @@ def install(c):
     lines = [line for line in lines if not line.startswith('inactivityFpsLimit:')] + ['inactivityFpsLimit:"minimized"']
     options.write_text('\n'.join(lines) + '\n')
     print('Installed mod, item icons and dimension.')
+
+
+def list_server(c, name, address):
+    """Put a server in Minecraft's multiplayer list (servers.dat), leaving what is already there."""
+    import nbt
+    path = minecraft(c) / 'servers.dat'
+    root = (10, {'servers': (9, (10, []))})
+    if path.is_file():
+        try:
+            root = nbt.read(path, compressed=False)[1]
+        except Exception:
+            return  # not a file we understand: leave it alone
+    kind, entries = root[1].setdefault('servers', (9, (10, [])))[1]
+    for entry in entries:
+        if entry.get('ip', (8, ''))[1].removesuffix(':25565') == address.removesuffix(':25565'):
+            # Joining straight from the launcher leaves a hidden entry; show it.
+            entry.pop('hidden', None)
+            entry['name'] = (8, name)
+            break
+    else:
+        entries.append({'name': (8, name), 'ip': (8, address)})
+    root[1]['servers'] = (9, (10, entries))
+    nbt.write(path, root, compressed=False)
 
 
 def native_env(c, bridged=True):
