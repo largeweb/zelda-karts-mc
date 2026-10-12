@@ -117,8 +117,8 @@ def settings(c, accept_eula):
         'gamemode': 'survival',
         'server-port': str(c.get('server_port', 25565)),
         'view-distance': '10',
-        # Invitation only until you decide otherwise: "hyrule server console whitelist add NAME".
-        'white-list': 'true',
+        # Invitation only unless local.json says "whitelist": false: "hyrule server console whitelist add NAME".
+        'white-list': 'true' if c.get('whitelist', True) else 'false',
     }
     lines = properties.read_text().splitlines() if properties.is_file() else []
     seen = set()
