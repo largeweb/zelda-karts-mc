@@ -81,21 +81,41 @@ How it fits together:
   `/field`, a home, respawning) their engine restarts showing that area, which takes a
   few seconds. Only the outdoor areas can be reached that way; interiors and dungeons
   are entered on foot.
-- **Kokiri Forest is the hub**: players arrive and respawn there, nothing can be built
-  or broken (operators excepted, permission `hyrule.hub.build`) and nobody takes
-  damage. Everywhere else is fair game for building, claiming and fighting.
-- `/zelda all` (or `/zelda hookshot` ...) gives the Zelda items. `/spawn` is the hub.
-  `/link`, `/spawnkart` and `/guide` are answered by the mod itself.
-- **Karts are for creative mode only** on a server.
-- The server starts with its whitelist on. Operators come from `"ops"` in `local.json`;
-  add players with `./hyrule server console whitelist add NAME`.
+- **Kokiri Forest is the hub**: players arrive and respawn there and nobody takes
+  damage. Only operators and players in creative mode can build or break there;
+  anyone else is told so and offered one-click links to places where they can.
+- **Everywhere else is open.** Digging into Hyrule's own ground and walls works as in
+  single player and everyone sees the same holes. The server marks a dug cell with an
+  invisible block; each client works the rest out from its own engine and asks the
+  server for the blocks that line a hole. A block placed in a hole closes it; a hoe on
+  that block takes it out again and leaves Zelda's surface. Faction claims and
+  WorldGuard regions apply to digging as they do to block breaking.
+- `/go` lists Hyrule's nineteen outdoor areas and `/go <name>` goes to one (you arrive
+  at its entrance). `/hub` and `/spawn` return to the hub.
+- `/kit starter` gives stone tools, a wooden hoe, food, dirt, cobblestone, planks,
+  torches, a bucket and seeds, once an hour (`server/essentials/kits.yml`).
+- `/zelda adult` gives adult Link's gear, `/zelda all` everything, `/zelda <item>` one
+  item. Link is always an adult on a server for now.
+- `/shop` opens a shop of building supplies, tools, food and spawn eggs
+  (`shop:` in the plugin's `config.yml`). Money comes from `/sell hand`; `/worth`
+  shows prices. New players start with $100.
+- Factions (`/f help`): create a faction, claim land, invite players. Homes, `/tpa`,
+  `/warp`, `/pay` and `/msg` come from EssentialsX.
+- `/link`, `/spawnkart` and `/guide` are answered by the mod itself. **Karts are for
+  creative mode only** on a server.
+- The whitelist follows `"whitelist"` in `local.json` (on unless set to false).
+  Operators come from `"ops"`. A player who joins without the mod is told so and it is
+  logged; set `require-mod-seconds` in the plugin's config to also disconnect them.
+- Dropped items and experience float where they appear: the server has no ground in
+  Hyrule to drop them onto.
 
 If a game engine hangs or crashes (single player or server), the mod notices within
-about twelve seconds and starts it again where it was, at most once a minute.
+about eight seconds and starts it again where it was.
 
-Not in multiplayer yet: digging into Hyrule's own ground and walls (blocks you place
-work normally), other players shown as Link (they appear as their Minecraft selves),
-Zelda items hurting other players, and Minecraft mobs standing on Hyrule's ground.
+Not in multiplayer yet: other players shown as Link (they appear as their Minecraft
+selves), Zelda items hurting other players, Minecraft explosions hurting Zelda
+creatures, and Minecraft mobs standing on Hyrule's ground (animals from spawn eggs
+fall). Rules are deliberately loose for now: the server trusts what clients tell it.
 
 `./hyrule server bundle` writes `dist/hyrule-server.tar.gz`: the server, plugins,
 settings and datapack without any world or player data, with a `start.sh`, ready to

@@ -1,0 +1,22 @@
+# EssentialsX kits for the Hyrule server; copied over plugins/Essentials/kits.yml by setup.
+# delay is seconds between uses.
+kits:
+  starter:
+    delay: 3600
+    items:
+      - stone_pickaxe 1
+      - stone_axe 1
+      - stone_shovel 1
+      - stone_sword 1
+      - wooden_hoe 1
+      - bread 16
+      - cooked_beef 8
+      - dirt 64
+      - cobblestone 64
+      - oak_planks 64
+      - oak_log 16
+      - torch 32
+      - crafting_table 1
+      - chest 2
+      - wheat_seeds 16
+      - water_bucket 1

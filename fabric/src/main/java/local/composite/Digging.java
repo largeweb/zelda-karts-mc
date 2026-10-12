@@ -156,7 +156,17 @@ public final class Digging {
 
  // --- client: per tick ------------------------------------------------------------
  public static void tick(Minecraft mc,Shared shm,int epoch){
-  var server=mc.getSingleplayerServer();if(server==null||mc.player==null)return;
+  var server=mc.getSingleplayerServer();
+  if(server==null&&mc.player!=null&&Remote.inHyrule()){
+   if(!remote){remote=true;forget();}
+   if(++ticks%5==0)survey(mc);
+   publishCarved(mc,shm,epoch);
+   mine(mc,shm,epoch);
+   classify(mc,shm,epoch);
+   return;
+  }
+  if(remote&&server!=null){remote=false;forget();loaded=false;}
+  if(server==null||mc.player==null)return;
   load(server.getWorldPath(LevelResource.ROOT));
   if(refreshDisplays){
    // Once per world load: make sure every scenery cell beside a dig has its displays
@@ -283,6 +293,16 @@ public final class Digging {
   var pos=target;int m=material;boolean drops=!mc.player.getAbilities().instabuild;
   mining=null;progress=0;
   var server=mc.getSingleplayerServer();
+  if(server==null){
+   // On a server: ask it. If it agrees the cell becomes a dug cell for everyone, and comes back here as one.
+   materials.put(pos.asLong(),m);
+   // Asked once; the answer takes a moment to come back as a dug cell.
+   long now=mc.level.getGameTime();
+   if(now-lined.getOrDefault(pos.asLong(),-1000L)<20)return;
+   lined.put(pos.asLong(),now);
+   Remote.command("hyrule dig "+pos.getX()+" "+pos.getY()+" "+pos.getZ()+" "+m);
+   return;
+  }
   server.execute(()->{
    var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
    var existing=level.getBlockState(pos);
@@ -320,6 +340,23 @@ public final class Digging {
    var fill=new ArrayList<Pending>();var partial=new ArrayList<Pending>();
    for(int i=0;i<answered.size();i++){
     var p=answered.get(i);int answer=Byte.toUnsignedInt(shm.mem.get(CLASSIFY_REPLY+4+i)),base=p.depth()|p.material()<<MATERIAL_SHIFT;
+    if(remote){
+     // On a server the answers are kept for the survey, which works out the cells afresh.
+     if(answer>1){
+      int o=CLASSIFY_PLANES+i*48,count=0;float[] found=new float[12];
+      for(int k=0;k<3;k++){
+       float nx=shm.mem.getFloat(o+k*16),ny=shm.mem.getFloat(o+k*16+4),nz=shm.mem.getFloat(o+k*16+8);
+       if(nx==0&&ny==0&&nz==0)continue;
+       float d=shm.mem.getFloat(o+k*16+12);
+       if(ny>.99f&&answer>=3)d=Math.min(d,(answer-3)/252f);
+       found[count*4]=nx;found[count*4+1]=ny;found[count*4+2]=nz;found[count*4+3]=d;count++;
+      }
+      // Scenery that crosses a cell without a usable surface is treated as open.
+      if(count>0)knownPlanes.put(p.pos().asLong(),java.util.Arrays.copyOf(found,count*4));else answer=0;
+     }
+     known.put(p.pos().asLong(),answer);
+     continue;
+    }
     if(answer==1)fill.add(p); // solid: becomes a real block below
     else if(answer==0)cells.putIfAbsent(p.pos().asLong(),base|OPEN);
     // Scenery runs through it; its plane says which part of the cell is solid.
@@ -341,7 +378,7 @@ public final class Digging {
     dirty=true;
    }
    var server=mc.getSingleplayerServer();
-   if(!fill.isEmpty()||!partial.isEmpty())server.execute(()->{
+   if(server!=null&&(!fill.isEmpty()||!partial.isEmpty()))server.execute(()->{
     var level=server.getLevel(NativeBlocks.DIMENSION);if(level==null)return;
     for(var p:partial)showSolidPart(level,p.pos(),planes.get(p.pos().asLong()),p.depth()>=DEPTH_STONE?Blocks.STONE:subsoil(p.material()));
     for(var p:fill){
@@ -356,7 +393,7 @@ public final class Digging {
   }
   if(queue.isEmpty())return;
   var batch=new ArrayList<Pending>();
-  while(batch.size()<CLASSIFY_MAX){var p=queue.poll();if(p==null)break;if(!cells.containsKey(p.pos().asLong()))batch.add(p);}
+  while(batch.size()<CLASSIFY_MAX){var p=queue.poll();if(p==null)break;if(remote?!known.containsKey(p.pos().asLong()):!cells.containsKey(p.pos().asLong()))batch.add(p);}
   if(batch.isEmpty())return;
   int origin=(int)Passthrough.origin();
   shm.mem.putInt(CLASSIFY_REQUEST+4,epoch);shm.mem.putInt(CLASSIFY_REQUEST+8,batch.size());
@@ -378,6 +415,14 @@ public final class Digging {
   if(!Passthrough.interactive()||!NativeBlocks.inDimension()||mc.player==null||!mc.player.getMainHandItem().is(net.minecraft.tags.ItemTags.HOES))return false;
   if(!(mc.hitResult instanceof BlockHitResult hit)||hit.getType()!=HitResult.Type.BLOCK)return false;
   var pos=hit.getBlockPos().immutable();Integer cell=cells.get(pos.asLong());
+  if(remote){
+   // On a server a block put into a dug cell has already closed it; the hoe takes the block
+   // back out and leaves the game's own surface.
+   if(!dug.contains(pos.asLong()))return false;
+   mc.player.swing(InteractionHand.MAIN_HAND,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+   Remote.command("hyrule restore "+pos.getX()+" "+pos.getY()+" "+pos.getZ());
+   return true;
+  }
   if(kind(cell)!=CARVED)return false;
   var server=mc.getSingleplayerServer();boolean drops=!mc.player.getAbilities().instabuild;
   int depth=cell&DEPTH,material=(cell>>MATERIAL_SHIFT)&0xff;boolean soil=(cell&WAS_FILLED)!=0;
@@ -417,6 +462,104 @@ public final class Digging {
  }
  private static Block subsoil(int material){
   return switch(material){case 1->Blocks.SANDSTONE;case 2,12->Blocks.STONE;default->Blocks.DIRT;};
+ }
+
+ // --- on a server -----------------------------------------------------------------
+ // The server marks each dug cell with an invisible block (a light block of level 0), so
+ // every player's game sees the same holes just by seeing the world. Each client works
+ // out the rest for itself from its own Zelda engine: which neighbouring cells are
+ // open, which hold part of the scenery (drawn here as block displays only this
+ // client has), and which are solid and need a real block, which it asks the server for.
+ private static boolean remote;
+ /** What Zelda said about a cell (0 open, 1 solid, more: scenery through it); never changes for a place. */
+ private static final Map<Long,Integer> known=new ConcurrentHashMap<>();
+ private static final Map<Long,float[]> knownPlanes=new ConcurrentHashMap<>();
+ /** Surface material of cells this player dug, so what lines them matches. */
+ private static final Map<Long,Integer> materials=new ConcurrentHashMap<>();
+ /** Cells seen dug at some time: a block standing in one can be taken out with a hoe. */
+ private static final java.util.Set<Long> dug=ConcurrentHashMap.newKeySet();
+ private static final Map<Long,Long> lined=new HashMap<>();
+ private static final Map<Long,List<net.minecraft.world.entity.Entity>> displays=new HashMap<>();
+ private static int displayId=-1000;
+ private static void forget(){
+  cells.clear();planes.clear();shapes.clear();queue.clear();asked=List.of();known.clear();knownPlanes.clear();materials.clear();dug.clear();lined.clear();
+  displays.clear();mapDirty=gridDirty=true;mining=null;
+ }
+ private static boolean marker(BlockState state){return state.is(Blocks.LIGHT)&&state.getValue(net.minecraft.world.level.block.LightBlock.LEVEL)==0;}
+ /** Read the dug cells around the player from the world and rebuild everything that follows from them. */
+ private static void survey(Minecraft mc){
+  var level=mc.level;var at=mc.player.blockPosition();var cursor=new BlockPos.MutableBlockPos();
+  var found=new HashMap<Long,Integer>();var surfaces=new HashMap<Long,float[]>();
+  var markers=new ArrayList<BlockPos>();
+  for(int x=-20;x<=20;x++)for(int z=-20;z<=20;z++)for(int y=-10;y<=10;y++){
+   cursor.set(at.getX()+x,at.getY()+y,at.getZ()+z);
+   if(marker(level.getBlockState(cursor))){markers.add(cursor.immutable());found.put(cursor.asLong(),CARVED);}
+  }
+  long now=level.getGameTime();
+  for(var pos:markers){
+   dug.add(pos.asLong());
+   int material=materials.getOrDefault(pos.asLong(),-1);
+   for(var direction:Direction.values()){
+    var next=pos.relative(direction);long key=next.asLong();
+    if(found.containsKey(key))continue;
+    if(material>=0)materials.putIfAbsent(key,material);
+    Integer answer=known.get(key);
+    if(answer==null){queue.add(new Pending(next.immutable(),1,0));continue;} // not asked yet: solid to the player meanwhile
+    if(answer==0)found.put(key,OPEN);
+    else if(answer==1){
+     var state=level.getBlockState(next);
+     if(!state.isAir())found.put(key,FILLED);
+     // Solid ground with nothing there: the server puts a block. Asked for again now and then until it is.
+     else if(next.distSqr(at)<100&&now-lined.getOrDefault(key,-1000L)>60){
+      lined.put(key,now);
+      Remote.command("hyrule line "+next.getX()+" "+next.getY()+" "+next.getZ()+" "+materials.getOrDefault(key,-1));
+     }
+    }else{
+     var surface=knownPlanes.get(key);
+     if(surface==null)continue;
+     found.put(key,SURFACE|Math.max(1,answer-3)<<HEIGHT_SHIFT);surfaces.put(key,surface);
+    }
+   }
+  }
+  if(found.equals(cells))return;
+  cells.clear();cells.putAll(found);planes.clear();planes.putAll(surfaces);shapes.clear();mapDirty=gridDirty=true;
+  // Block displays for the solid part of scenery cells, on this client only.
+  for(var it=displays.entrySet().iterator();it.hasNext();){
+   var e=it.next();
+   if(surfaces.containsKey(e.getKey()))continue;
+   for(var entity:e.getValue())level.removeEntity(entity.getId(),net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
+   it.remove();
+  }
+  for(var e:surfaces.entrySet()){
+   if(displays.containsKey(e.getKey()))continue;
+   var pos=BlockPos.of(e.getKey());var made=new ArrayList<net.minecraft.world.entity.Entity>();
+   var block=subsoil(materials.getOrDefault(e.getKey(),0)).defaultBlockState();
+   for(double[] box:pieces(e.getValue(),e.getValue().length>4?4:2,true)){
+    var display=localDisplay(level,pos,block,box);
+    if(display!=null){level.addEntity(display);made.add(display);}
+   }
+   displays.put(e.getKey(),made);
+  }
+ }
+ private static java.lang.reflect.Method setBlock,setTransformation,setBrightness;
+ /** A block display that exists only in this client's world. Its setters are private to the game. */
+ private static net.minecraft.world.entity.Entity localDisplay(net.minecraft.client.multiplayer.ClientLevel level,BlockPos pos,BlockState block,double[] box){
+  try{
+   if(setBlock==null){
+    setBlock=net.minecraft.world.entity.Display.BlockDisplay.class.getDeclaredMethod("setBlockState",BlockState.class);
+    setTransformation=net.minecraft.world.entity.Display.class.getDeclaredMethod("setTransformation",com.mojang.math.Transformation.class);
+    setBrightness=net.minecraft.world.entity.Display.class.getDeclaredMethod("setBrightnessOverride",net.minecraft.util.Brightness.class);
+    for(var method:new java.lang.reflect.Method[]{setBlock,setTransformation,setBrightness})method.setAccessible(true);
+   }
+   var display=new net.minecraft.world.entity.Display.BlockDisplay(net.minecraft.world.entity.EntityTypes.BLOCK_DISPLAY,level);
+   display.setId(displayId--);
+   display.setPos(pos.getX(),pos.getY(),pos.getZ());
+   setBlock.invoke(display,block);
+   setTransformation.invoke(display,new com.mojang.math.Transformation(new org.joml.Vector3f((float)box[0],(float)box[1],(float)box[2]),new org.joml.Quaternionf(),
+    new org.joml.Vector3f((float)(box[3]-box[0]),(float)(box[4]-box[1]),(float)(box[5]-box[2])),new org.joml.Quaternionf()));
+   setBrightness.invoke(display,new net.minecraft.util.Brightness(0,15));
+   return display;
+  }catch(ReflectiveOperationException e){System.err.println("Could not make a block display: "+e);return null;}
  }
 
  // --- persistence: one small file beside the world --------------------------------

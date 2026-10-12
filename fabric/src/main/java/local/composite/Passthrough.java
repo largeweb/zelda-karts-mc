@@ -66,6 +66,7 @@ public final class Passthrough {
     // On a server: the player is already in Hyrule there. If the server put them
     // somewhere in this area (where they logged out, a home, a warp), that is where they stand.
     Remote.greet();
+    ZeldaStatus.requestAge(0); // adult Link only on a server, for now
     if(Remote.destination!=null&&Remote.sceneAt(Remote.destination.x)==scene)player.setPos(Remote.destination);
     Remote.destination=null;astray=0;
    }
@@ -156,7 +157,7 @@ public final class Passthrough {
   */
  private static boolean relocated(Minecraft mc,LocalPlayer player){
   if(scene>=1000)return false;
-  if(Remote.sceneAt(player.getX())==scene){astray=0;lastInArea=player.position();return false;}
+  if(Remote.sceneAt(player.getX())==scene&&player.getY()<Remote.ARRIVING){astray=0;lastInArea=player.position();return false;}
   if(++astray<10)return false; // the engine itself changes area a moment before the player is moved
   astray=0;
   var entrance=Remote.entrance(Remote.sceneAt(player.getX()));

@@ -60,6 +60,16 @@ public final class Guide {
    "Karts also work everywhere in Hyrule if Mario Kart 64 is installed: /spawnkart there",
    "starts the kart game alongside (about eight seconds) and the kart drives on Zelda's ground.",
    "Leaving an area leaves the kart behind; /spawnkart again brings one to you.")),
+  new Page("On a server",List.of(
+   "Kokiri Forest is the hub: safe, and only staff can build there. /hub returns to it.",
+   "/go lists Hyrule's outdoor areas; /go field, /go lake and so on take you there.",
+   "Everywhere outside the hub you can dig into Hyrule and build, and everyone sees it.",
+   "To mend a hole: put a block in it, then use a hoe on that block.",
+   "/kit starter gives tools, food, blocks, a hoe and dirt, once an hour.",
+   "/zelda adult gives Link's gear; /zelda all gives every Zelda item.",
+   "/shop sells supplies; /sell hand and /worth turn what you gather into money.",
+   "/f help covers factions: create one, claim land, invite friends.",
+   "Link is always an adult on a server. Karts need creative mode.")),
   new Page("Worlds and saving",List.of(
    "Create New World has a Map button: plain Minecraft, Ocarina of Time, or a Mario Kart 64 track.",
    "An Ocarina of Time world has its own Zelda save and starts Zelda when you open it.",

@@ -88,6 +88,7 @@ def build_plugin(c):
         # Paper unpacks its libraries on first run and then stops at the EULA.
         subprocess.run([java(c), '-jar', 'paper.jar', '--nogui'], cwd=SERVER, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         libraries = sorted((SERVER / 'libraries').rglob('*.jar'))
+    libraries += sorted((SERVER / 'plugins').glob('Vault*.jar'))  # the economy interface the shop uses
     build = ROOT / 'server/plugin/build'
     shutil.rmtree(build, ignore_errors=True)
     classes = build / 'classes'
@@ -161,13 +162,41 @@ def tune():
     essentials = SERVER / 'plugins/Essentials/config.yml'
     if essentials.is_file():
         text = essentials.read_text()
-        tuned = text.replace("  spawnpoint: newbies", "  spawnpoint: none").replace("  kit: tools", "  kit: ''")
+        tuned = text.replace("  spawnpoint: newbies", "  spawnpoint: none").replace("  kit: tools", "  kit: ''").replace('\nstarting-balance: 0\n', '\nstarting-balance: 100\n')
         if tuned != text:
             essentials.write_text(tuned)
+        shutil.copy2(ROOT / 'server/essentials/kits.yml', SERVER / 'plugins/Essentials/kits.yml')
+    spigot = SERVER / 'spigot.yml'
+    if spigot.is_file():
+        # The mod talks to the Hyrule plugin with /hyrule commands, several a second while
+        # digging: they are not chat spam.
+        text = spigot.read_text()
+        tuned = text.replace('  spam-exclusions:\n  - /skill\n', '  spam-exclusions:\n  - /skill\n  - /hyrule\n').replace('enable-spam-exclusions: false', 'enable-spam-exclusions: true')
+        if tuned != text:
+            spigot.write_text(tuned)
     commands = SERVER / 'commands.yml'
     if commands.is_file() and 'hub' not in commands.read_text():
         # /spawn is the hub.
         commands.write_text(commands.read_text().replace('aliases:', 'aliases:\n  spawn:\n  - hub', 1))
+
+
+# What ordinary players may do, given to LuckPerms' default group once the server is up.
+PLAYER_PERMISSIONS = ['essentials.kit', 'essentials.kits.starter', 'essentials.spawn', 'essentials.home', 'essentials.sethome', 'essentials.delhome',
+                      'essentials.tpa', 'essentials.tpaccept', 'essentials.tpdeny', 'essentials.warp', 'essentials.warp.list', 'essentials.balance',
+                      'essentials.pay', 'essentials.sell', 'essentials.worth', 'essentials.msg', 'essentials.help', 'essentials.list',
+                      'essentials.signs.use.buy', 'essentials.signs.use.sell']
+
+
+def permissions():
+    done = SERVER / 'plugins/.hyrule/permissions'
+    wanted = '\n'.join(PLAYER_PERMISSIONS)
+    if done.is_file() and done.read_text() == wanted:
+        return
+    for permission in PLAYER_PERMISSIONS:
+        console(f'lp group default permission set {permission} true')
+        time.sleep(.05)
+    done.parent.mkdir(parents=True, exist_ok=True)
+    done.write_text(wanted)
 
 
 def pid():
@@ -210,6 +239,7 @@ def start(c):
         time.sleep(1)
         text = log.read_text(errors='replace') if log.is_file() else ''
         if 'Done (' in text and pid() is not None:
+            permissions()
             print('Server running on port', c.get('server_port', 25565))
             return
         if pid() is None and _ > 5:

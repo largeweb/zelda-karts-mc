@@ -38,13 +38,15 @@ public final class Remote {
   return mc.gameDirectory.toPath().resolve("hyrule-servers").resolve(name).toAbsolutePath().normalize();
  }
  /** The settings to start the engine with so it shows the area the player is standing in. */
+ /** The server sends a player "to an area" by putting them high above it: they arrive at the area's own entrance. */
+ public static final double ARRIVING=1900;
  static Map<String,String> startFor(Vec3 position){
   var entrance=entrance(sceneAt(position.x));
-  destination=entrance==null?null:position;
+  destination=entrance==null||position.y>ARRIVING?null:position;
   return Map.of("COMPOSITE_START",String.format("0x%X",entrance==null?ENTRANCES.get(HUB):entrance));
  }
- /** Once per connection: tell the server's plugin this player has the mod. */
- static void greet(){if(!greeted){greeted=true;command("hyrule hello 1");}}
+ /** Each time the engine comes up: tell the server's plugin this player has the mod. */
+ static void greet(){greeted=true;command("hyrule hello 1");}
  static void reset(){greeted=false;destination=null;}
  /** Commands this mod answers itself when on a server. True when the command was one of them. */
  public static boolean ownCommand(String command){
@@ -52,8 +54,8 @@ public final class Remote {
   var parts=command.trim().split("\\s+");
   switch(parts[0]){
    case "link"->{
-    if(parts.length==2&&(parts[1].equals("adult")||parts[1].equals("child"))){ZeldaStatus.requestAge(parts[1].equals("adult")?0:1);say("Link becomes "+parts[1]+".");}
-    else say("/link adult or /link child");
+    // For now everyone on a server is adult Link.
+    say("On a server Link is always an adult.");
    }
    case "spawnkart"->{
     try{if(parts.length>1)Karts.spawn(Integer.parseInt(parts[1]));else Karts.ask();}

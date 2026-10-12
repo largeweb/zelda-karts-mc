@@ -12,7 +12,58 @@ field:         # /field
   y: 1024.0
   z: 33.0
   yaw: 180
-# Players without the Hyrule mod see only an empty sky. They are told how to get it
-# and disconnected after this many seconds; 0 lets them stay.
-require-mod-seconds: 45
+# /go <name>: Hyrule's outdoor areas by Zelda scene number. Players arrive at the
+# area's own entrance.
+areas:
+  field:    {scene: 81, title: Hyrule Field}
+  kakariko: {scene: 82, title: Kakariko Village}
+  graveyard: {scene: 83, title: Graveyard}
+  river:    {scene: 84, title: Zora's River}
+  kokiri:   {scene: 85, title: Kokiri Forest}
+  meadow:   {scene: 86, title: Sacred Forest Meadow}
+  lake:     {scene: 87, title: Lake Hylia}
+  domain:   {scene: 88, title: Zora's Domain}
+  fountain: {scene: 89, title: Zora's Fountain}
+  valley:   {scene: 90, title: Gerudo Valley}
+  woods:    {scene: 91, title: Lost Woods}
+  colossus: {scene: 92, title: Desert Colossus}
+  fortress: {scene: 93, title: Gerudo's Fortress}
+  wasteland: {scene: 94, title: Haunted Wasteland}
+  castle:   {scene: 95, title: Hyrule Castle}
+  mountain: {scene: 96, title: Death Mountain Trail}
+  crater:   {scene: 97, title: Death Mountain Crater}
+  goron:    {scene: 98, title: Goron City}
+  ranch:    {scene: 99, title: Lon Lon Ranch}
+# Offered as links when someone tries to build in the hub.
+featured-areas: [field, kakariko, lake, ranch, valley]
+# /zelda adult
+adult-items: [master_sword, biggoron_sword, fairy_bow, fire_arrow, ice_arrow, light_arrow, hookshot, longshot, bomb, bombchu, megaton_hammer, dins_fire, farores_wind, nayrus_love, lens_of_truth, ocarina_of_time]
+# /shop: item, how many, price. Players earn money with /sell (prices in Essentials' worth.yml).
+shop:
+  - oak_log 16 20
+  - cobblestone 64 15
+  - stone_bricks 64 40
+  - glass 16 25
+  - torch 32 15
+  - iron_ingot 8 60
+  - iron_pickaxe 1 50
+  - iron_axe 1 45
+  - iron_shovel 1 20
+  - iron_sword 1 40
+  - diamond 1 120
+  - bread 16 20
+  - cooked_beef 16 40
+  - wheat_seeds 16 10
+  - bone_meal 16 20
+  - water_bucket 1 30
+  - oak_sapling 4 15
+  - chest 4 20
+  - white_bed 1 30
+  - tnt 4 100
+  - cow_spawn_egg 1 150
+  - chicken_spawn_egg 1 80
+  - sheep_spawn_egg 1 120
+# Someone without the Hyrule mod sees only an empty sky. They are told, and it is logged.
+# To also disconnect them, set how many seconds later; 0 lets them stay.
+require-mod-seconds: 0
 mod-missing-message: "This server needs the Hyrule Composite mod and your own Ocarina of Time ROM. See the server's website for setup."

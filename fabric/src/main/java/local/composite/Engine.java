@@ -78,15 +78,15 @@ public final class Engine {
  private static long startedAt,revivedAt;
  /**
   * An engine that has stopped drawing (hung, or crashed) leaves the player in an empty
-  * world. It is started again where it left off; at most once a minute, so a game that
+  * world. It is started again where it left off; at most twice a minute, so a game that
   * cannot run does not restart for ever.
   */
  private static void watch(Minecraft mc){
   if(process==null||game==null||world==null)return;
   long now=System.nanoTime();
-  boolean dead=!process.isAlive(),silent=now-startedAt>40_000_000_000L&&Bridge.engineSilence()>12&&Bridge.engineSilence()<1e8;
-  boolean neverDrew=now-startedAt>60_000_000_000L&&Bridge.engineSilence()>=1e8;
-  if(!(dead||silent||neverDrew)||now-revivedAt<60_000_000_000L)return;
+  boolean dead=!process.isAlive(),silent=now-startedAt>20_000_000_000L&&Bridge.engineSilence()>8&&Bridge.engineSilence()<1e8;
+  boolean neverDrew=now-startedAt>40_000_000_000L&&Bridge.engineSilence()>=1e8;
+  if(!(dead||silent||neverDrew)||now-revivedAt<30_000_000_000L)return;
   revivedAt=now;
   System.err.println(game.title()+" engine "+(dead?"exited":"stopped responding")+"; starting it again");
   tell(mc,game.title()+" stopped responding and was started again.");
