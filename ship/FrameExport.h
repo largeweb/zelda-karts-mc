@@ -71,6 +71,14 @@ extern "C" void CompositeExportFrame(SDL_Window* win) {
     static std::vector<float> depth;
     if (failed) return;
     if (!mem) {
+#ifdef _WIN32
+        static composite::windows::Mapping transport;
+        if (!transport.openEnvironment(L"COMPOSITE_FRAME", capacity)) {
+            failed = true;
+            return;
+        }
+        mem = transport.data();
+#else
         int fd = open(base, O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
         struct stat st {};
         if (fd < 0 || fstat(fd, &st) || st.st_uid != getuid() || !S_ISREG(st.st_mode) || flock(fd, LOCK_EX | LOCK_NB) ||
@@ -86,6 +94,7 @@ extern "C" void CompositeExportFrame(SDL_Window* win) {
             return;
         }
         mem = (uint8_t*)p;
+#endif
         std::memset(mem, 0, FRAME_HEADER);
     }
     int w, h;
