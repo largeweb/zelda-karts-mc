@@ -68,6 +68,10 @@ public final class Dev {
     var key=q.get("zelda").getAsString();var server=mc.getSingleplayerServer();var uuid=mc.player.getUUID();
     if(server==null)mc.getConnection().sendCommand("zelda "+key);
     else for(var entry:ZeldaItems.ALL)if(entry.key().equals(key))server.execute(()->{var sp=server.getPlayerList().getPlayer(uuid);if(sp!=null)sp.getInventory().add(ZeldaItems.stack(entry));});
+   }else if(q.has("disconnect")){
+    mc.disconnectWithProgressScreen(); // leave the world or server, as from the pause menu
+   }else if(q.has("open")&&mc.level==null){
+    mc.createWorldOpenFlows().openWorld(q.get("open").getAsString(),()->{});
    }else if(q.has("command")){
     var server=mc.getSingleplayerServer();
     if(server!=null)server.execute(()->server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),q.get("command").getAsString()));

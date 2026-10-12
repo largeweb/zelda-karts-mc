@@ -334,7 +334,8 @@ public final class HyrulePlugin extends JavaPlugin implements Listener {
 
     private void line(Player player, String[] args) {
         var block = cell(player, args);
-        if (block == null || !block.getType().isAir() || justBroken.contains(block) || !besideDig(block) || inHub(block.getLocation())) return;
+        // Wherever a dig was allowed (in the hub that means staff), the ground it exposes gets its blocks.
+        if (block == null || !block.getType().isAir() || justBroken.contains(block) || !besideDig(block)) return;
         int material = -1;
         try { material = Integer.parseInt(args[4]); } catch (RuntimeException e) { }
         block.setType(lining(block, material), false);

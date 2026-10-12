@@ -6,6 +6,7 @@
   console.py move TICKS [forward|back|left|right|jump]
   console.py zelda ITEM_KEY          (e.g. hookshot; adds the item to the inventory)
   console.py attack TICKS | use TICKS | view YAW PITCH | slot N | camera N | close-screen | quit
+  console.py disconnect | open WORLD_NAME     (leave the world or server; open a single-player world)
   console.py <any server command, e.g. gamemode survival>"""
 import json, sys, time, uuid
 from pathlib import Path
@@ -46,6 +47,10 @@ def main(args):
         send({'view': [float(args[1]), float(args[2])]})
     elif verb in ('slot', 'camera'):
         send({verb: int(args[1])})
+    elif verb == 'disconnect':
+        send({'disconnect': True})
+    elif verb == 'open':
+        send({'open': args[1]})
     elif verb == 'zelda':
         send({'zelda': args[1]})
     elif verb == 'respawn':

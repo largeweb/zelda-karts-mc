@@ -158,7 +158,7 @@ public final class Digging {
  public static void tick(Minecraft mc,Shared shm,int epoch){
   var server=mc.getSingleplayerServer();
   if(server==null&&mc.player!=null&&Remote.inHyrule()){
-   if(!remote){remote=true;forget();}
+   if(!remote){flush();remote=true;forget();}
    if(++ticks%5==0)survey(mc);
    publishCarved(mc,shm,epoch);
    mine(mc,shm,epoch);
@@ -463,6 +463,9 @@ public final class Digging {
  private static Block subsoil(int material){
   return switch(material){case 1->Blocks.SANDSTONE;case 2,12->Blocks.STONE;default->Blocks.DIRT;};
  }
+
+ /** Write out digs not yet saved; called when the world is being left. */
+ public static void flush(){if(dirty&&loaded&&!remote)save();}
 
  // --- on a server -----------------------------------------------------------------
  // The server marks each dug cell with an invisible block (a light block of level 0), so

@@ -61,6 +61,7 @@ public final class Engine {
   else if(server==null)Remote.reset();
   report(mc);
   if(java.util.Objects.equals(open,world)){watch(mc);return;}
+  Digging.flush(); // the world being left keeps its last few digs
   stop();
   world=open;extra=java.util.Map.of();game=null;
   if(open==null)return;
