@@ -127,6 +127,13 @@ GoldenEye is listed but not supported yet.
 The Ship of Harkinian window lives on the `Zelda-renderer` workspace and must
 stay open while an Ocarina of Time world is.
 
+## An agent that plays
+
+`tools/agent.py` lets a decision model (TypeSafe's Jev, or a compatible one) play on the
+server from game state: a planner writes a short brief, the model picks one bounded
+action at a time. It can found a faction, claim land and build a small irrigated farm.
+See [docs/AGENT.md](docs/AGENT.md).
+
 ## First-time setup
 
 Platform guides: [Omarchy / Arch Linux](docs/INSTALL-OMARCHY.md) (the platform this is

@@ -181,7 +181,7 @@ def tune():
 
 
 # What ordinary players may do, given to LuckPerms' default group once the server is up.
-PLAYER_PERMISSIONS = ['essentials.kit', 'essentials.kits.starter', 'essentials.spawn', 'essentials.home', 'essentials.sethome', 'essentials.delhome',
+PLAYER_PERMISSIONS = ['essentials.kit', 'essentials.kits.starter', 'essentials.kits.farmer', 'essentials.spawn', 'essentials.home', 'essentials.sethome', 'essentials.delhome',
                       'essentials.tpa', 'essentials.tpaccept', 'essentials.tpdeny', 'essentials.warp', 'essentials.warp.list', 'essentials.balance',
                       'essentials.pay', 'essentials.sell', 'essentials.worth', 'essentials.msg', 'essentials.help', 'essentials.list',
                       'essentials.signs.use.buy', 'essentials.signs.use.sell']

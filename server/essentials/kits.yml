@@ -20,3 +20,16 @@ kits:
       - chest 2
       - wheat_seeds 16
       - water_bucket 1
+  # What a small irrigated plot needs; the agent (tools/agent.py) starts from this one.
+  farmer:
+    delay: 3600
+    items:
+      - wooden_hoe 1
+      - water_bucket 1
+      - dirt 32
+      - wheat_seeds 16
+      - carrot 8
+      - potato 8
+      - oak_sapling 4
+      - bone_meal 16
+      - bread 8

@@ -25,7 +25,38 @@ public final class Dev {
    return true;
   }catch(Exception e){System.err.println("Dev startup: "+e);return true;}
  }
- private static int ticks,useTicks,attackTicks,moveTicks;
+ private static int ticks,useTicks,attackTicks,moveTicks,gotoTicks,digTicks;
+ private static double gotoX,gotoZ;
+ private static net.minecraft.core.BlockPos digAt;
+ private static net.minecraft.core.BlockPos block(JsonObject q,String key){var v=q.getAsJsonArray(key);return new net.minecraft.core.BlockPos(v.get(0).getAsInt(),v.get(1).getAsInt(),v.get(2).getAsInt());}
+ private static void face(Minecraft mc,double x,double y,double z){
+  var eye=mc.player.getEyePosition();double dx=x-eye.x,dy=y-eye.y,dz=z-eye.z;
+  mc.player.setYRot((float)Math.toDegrees(Math.atan2(-dx,dz)));mc.player.setXRot((float)-Math.toDegrees(Math.atan2(dy,Math.hypot(dx,dz))));
+ }
+ /** Walking to a spot and mining a block take many ticks; the agent starts them and watches the status. */
+ private static void longActions(Minecraft mc){
+  if(mc.player==null){gotoTicks=digTicks=0;return;}
+  if(gotoTicks>0){
+   double dx=gotoX-mc.player.getX(),dz=gotoZ-mc.player.getZ();
+   if(--gotoTicks==0||Math.hypot(dx,dz)<.35){gotoTicks=0;mc.options.keyUp.setDown(false);}
+   else{mc.player.setYRot((float)Math.toDegrees(Math.atan2(-dx,dz)));mc.options.keyUp.setDown(true);}
+  }
+  if(digTicks>0&&digAt!=null){
+   if(--digTicks==0||mc.level.getBlockState(digAt).isAir()){digTicks=0;mc.gameMode.stopDestroyBlock();}
+   else{face(mc,digAt.getX()+.5,digAt.getY()+.5,digAt.getZ()+.5);mc.gameMode.continueDestroyBlock(digAt,net.minecraft.core.Direction.UP);mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);}
+  }
+ }
+ /** Puts the named item in the hand: selects its hotbar slot, or swaps it in from the pack. */
+ private static boolean hold(Minecraft mc,String id){
+  var bag=mc.player.getInventory();
+  if(mc.player.containerMenu!=mc.player.inventoryMenu)mc.player.closeContainer(); // a server menu left open would swallow the swap
+  for(int i=0;i<36;i++)if(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(bag.getItem(i).getItem()).toString().equals(id)){
+   if(i<9)bag.setSelectedSlot(i);
+   else mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,i,bag.getSelectedSlot(),net.minecraft.world.inventory.ContainerInput.SWAP,mc.player);
+   return true;
+  }
+  return false;
+ }
  private static KeyMapping moveKey;
  private static void write(String file,JsonObject value)throws Exception{
   var temp=ROOT.resolve(file+".tmp");Files.writeString(temp,JSON.toJson(value));
@@ -37,6 +68,7 @@ public final class Dev {
    if(moveTicks>0&&--moveTicks==0)moveKey.setDown(false);
    if(attackTicks>0&&--attackTicks==0)mc.options.keyAttack.setDown(false);
    if(useTicks>0&&--useTicks==0)mc.options.keyUse.setDown(false);
+   longActions(mc);
    if(++ticks%10==0)write("status.json",status(mc));
    var request=ROOT.resolve("command.json");
    if(!Files.isRegularFile(request))return;
@@ -47,6 +79,7 @@ public final class Dev {
    }else if(q.has("respawn")&&mc.player!=null){
     mc.player.respawn();mc.gui.setScreen(null);
    }else if(q.has("closeScreen")){
+    if(mc.player!=null)mc.player.closeContainer();
     mc.gui.setScreen(null);
    }else if(q.has("move")){
     if(moveKey!=null)moveKey.setDown(false);
@@ -60,6 +93,30 @@ public final class Dev {
     var v=q.getAsJsonArray("view");mc.player.setYRot(v.get(0).getAsFloat());mc.player.setXRot(v.get(1).getAsFloat());
    }else if(q.has("slot")&&mc.player!=null){
     mc.player.getInventory().setSelectedSlot(q.get("slot").getAsInt());
+   }else if(q.has("hold")&&mc.player!=null){
+    answer.addProperty("ok",hold(mc,q.get("hold").getAsString()));
+   }else if(q.has("place")&&mc.player!=null){
+    // As NativeBlocks does for the first block on Zelda ground: a click on the empty cell itself.
+    var pos=block(q,"place");var hand=net.minecraft.world.InteractionHand.MAIN_HAND;
+    face(mc,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5);
+    answer.addProperty("ok",mc.gameMode.useItemOn(mc.player,hand,new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(pos.getX()+.5,pos.getY(),pos.getZ()+.5),net.minecraft.core.Direction.UP,pos,false)).consumesAction());
+    mc.player.swing(hand,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+   }else if(q.has("useOn")&&mc.player!=null){
+    var pos=block(q,"useOn");var hand=net.minecraft.world.InteractionHand.MAIN_HAND;
+    face(mc,pos.getX()+.5,pos.getY()+1,pos.getZ()+.5);
+    answer.addProperty("ok",mc.gameMode.useItemOn(mc.player,hand,new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(pos.getX()+.5,pos.getY()+1,pos.getZ()+.5),net.minecraft.core.Direction.UP,pos,false)).consumesAction());
+    mc.player.swing(hand,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+   }else if(q.has("pour")&&mc.player!=null){
+    // Buckets aim along the view on the server, so the view is set to the top of the named block first.
+    var pos=block(q,"pour");face(mc,pos.getX()+.5,pos.getY()+1,pos.getZ()+.5);
+    answer.addProperty("ok",mc.gameMode.useItem(mc.player,net.minecraft.world.InteractionHand.MAIN_HAND).consumesAction());
+   }else if(q.has("goto")&&mc.player!=null){
+    var v=q.getAsJsonArray("goto");gotoX=v.get(0).getAsDouble();gotoZ=v.get(1).getAsDouble();gotoTicks=q.has("ticks")?Math.clamp(q.get("ticks").getAsInt(),1,600):200;
+   }else if(q.has("dig")&&mc.player!=null){
+    digAt=block(q,"dig");digTicks=q.has("ticks")?Math.clamp(q.get("ticks").getAsInt(),1,600):200;
+    mc.gameMode.startDestroyBlock(digAt,net.minecraft.core.Direction.UP);
+   }else if(q.has("stop")){
+    gotoTicks=digTicks=0;mc.options.keyUp.setDown(false);mc.gameMode.stopDestroyBlock();
    }else if(q.has("camera")){
     mc.options.setCameraType(net.minecraft.client.CameraType.values()[q.get("camera").getAsInt()]);
    }else if(q.has("quit")){
@@ -91,6 +148,26 @@ public final class Dev {
    s.addProperty("grounded",mc.player.onGround());s.addProperty("health",mc.player.getHealth());
    s.addProperty("item",mc.player.getMainHandItem().toString());s.addProperty("zeldaItem",ZeldaItems.held(mc));
    s.addProperty("rupees",mc.player.experienceLevel);
+   s.addProperty("mode",mc.gameMode.getPlayerMode().getName());s.addProperty("food",mc.player.getFoodData().getFoodLevel());
+   s.addProperty("busy",gotoTicks>0||digTicks>0);s.addProperty("server",mc.getSingleplayerServer()==null);
+   var bag=new JsonObject();
+   for(int i=0;i<36;i++){var stack=mc.player.getInventory().getItem(i);if(stack.isEmpty())continue;
+    var id=net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();bag.addProperty(id,(bag.has(id)?bag.get(id).getAsInt():0)+stack.getCount());}
+   s.add("inventory",bag);
+   // Blocks around the player, for an agent that decides from state instead of from the picture.
+   var near=new JsonArray();var at=mc.player.blockPosition();
+   for(var pos:net.minecraft.core.BlockPos.betweenClosed(at.offset(-6,-3,-6),at.offset(6,3,6))){
+    var state=mc.level.getBlockState(pos);if(state.isAir()||state.is(net.minecraft.world.level.block.Blocks.LIGHT)||near.size()>=400)continue;
+    var entry=new JsonArray();entry.add(pos.getX());entry.add(pos.getY());entry.add(pos.getZ());
+    entry.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath());near.add(entry);
+   }
+   s.add("blocks",near);
+   try{
+    var field=net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");field.setAccessible(true);
+    var lines=new JsonArray();var all=(java.util.List<?>)field.get(mc.gui.hud.getChat());
+    for(int i=Math.min(all.size(),30)-1;i>=0;i--)lines.add(((net.minecraft.client.multiplayer.chat.GuiMessage)all.get(i)).content().getString());
+    s.add("chat",lines);
+   }catch(ReflectiveOperationException e){}
    if(mc.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit){
     s.addProperty("hit",hit.getType()+" "+hit.getBlockPos().toShortString()+" "+mc.level.getBlockState(hit.getBlockPos()).getBlock());
    }else s.addProperty("hit",String.valueOf(mc.hitResult==null?null:mc.hitResult.getType()));
