@@ -34,13 +34,43 @@ The Jev key comes from `TYPESAFE_API_KEY`, or `"jev": {"key": "..."}` in `local.
 (never committed). `"base_url"` there points the same request at a compatible server,
 hosted or local; `"model"` names the model.
 
-## What it can build so far
+## Blueprints
 
-One blueprint: a 3x3 irrigated plot (water in the middle, eight sown cells), a faction
-and a claim on the chunk it stands in, optionally a sapling beside it. The `farmer` kit
-(`/kit farmer`, hourly) supplies the materials. The water is poured through the cell
-facing the agent, so that cell has to stay open until the water is in: the one ordering
-trap in the task, and the model is told about it rather than prevented from making it.
+| `build` | What | How it is placed |
+|---|---|---|
+| `farm` | 3x3 irrigated plot, a faction, a claim (survival) | by hand; `/kit farmer` supplies it |
+| `ring` | one cobblestone generator feeding a self-repairing ring (`tools/ring.py`) | by `/setblock` and `/fill`, a part at a time: a test of the design, not of the player |
+| `tube` | eight generators feeding a wall, ceiling, wall and floor, eight wide, over a lava pit (`tools/tube.py`) | by hand in creative: 576 placements, each read back from the game |
 
-Not built yet: a language-model planner loop, more blueprints, pathfinding around
-Zelda scenery (it walks in a straight line), and anything that needs the picture.
+For `tube` the model chooses among the nearest cells that can be placed now (their
+part's prerequisites stand, and so does the block under them), flying to another part,
+breaking a wrong block, or waiting. A placement is an item, a view direction and a
+click: pistons end up facing the player, repeaters carry the signal the way the player
+looks, and a repeater's delay is further clicks. The state the model sees is the
+position inside the blueprint, progress per part, what is in the hand, the operator's
+`focus` and `avoid` lists, and the last results.
+
+`tube` has not been built yet: its redstone follows the `ring` design, which runs, but
+the eight-lane layout itself is untested.
+
+## The operator
+
+The planner is meant to be replaceable: a person, a coding agent, or a language model
+on a timer. Its whole interface is four commands and the brief.
+
+    python3 tools/agent.py run --forever         # the controller; waits for a new brief when it hands back
+    python3 tools/agent.py observe               # one JSON document: brief, controller state, progress, last
+                                                 # actions, failures, unsure decisions, new messages, notes, frames
+    python3 tools/agent.py brief focus=clock,riser avoid=lava_pit notes="..."
+    python3 tools/agent.py remember "pours fail unless hovering right above the cell"
+    python3 tools/agent.py tell "build it nearer the castle"    # the person, to the operator
+    python3 tools/agent.py say "moved the site; 212 of 576 placed"
+
+An operator tick is: `observe`, look at the frames it lists, change the brief, optionally
+`remember` and `say`. The controller reads the brief again before every decision.
+
+## Limits
+
+The player walks and flies in straight lines. The controller reads blocks within six
+blocks of the player (five up and down); it does not yet read the Zelda ground under
+them, and nothing is decided from the picture: frames are for the operator only.

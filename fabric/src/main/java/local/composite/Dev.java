@@ -25,8 +25,9 @@ public final class Dev {
    return true;
   }catch(Exception e){System.err.println("Dev startup: "+e);return true;}
  }
- private static int ticks,useTicks,attackTicks,moveTicks,gotoTicks,digTicks;
+ private static int ticks,useTicks,attackTicks,moveTicks,gotoTicks,digTicks,flyTicks;
  private static double gotoX,gotoZ;
+ private static net.minecraft.world.phys.Vec3 flyTo;
  private static net.minecraft.core.BlockPos digAt;
  private static net.minecraft.core.BlockPos block(JsonObject q,String key){var v=q.getAsJsonArray(key);return new net.minecraft.core.BlockPos(v.get(0).getAsInt(),v.get(1).getAsInt(),v.get(2).getAsInt());}
  private static void face(Minecraft mc,double x,double y,double z){
@@ -35,7 +36,17 @@ public final class Dev {
  }
  /** Walking to a spot and mining a block take many ticks; the agent starts them and watches the status. */
  private static void longActions(Minecraft mc){
-  if(mc.player==null){gotoTicks=digTicks=0;return;}
+  if(mc.player==null){gotoTicks=digTicks=flyTicks=0;return;}
+  if(flyTicks>0){
+   // Creative flight to a point, then hovering there: the way an agent reaches cells above the ground.
+   var left=flyTo.subtract(mc.player.position());var abilities=mc.player.getAbilities();
+   if(!abilities.mayfly){flyTicks=0;}
+   else{
+    if(!abilities.flying){abilities.flying=true;mc.player.onUpdateAbilities();}
+    if(--flyTicks==0||left.length()<.15){flyTicks=0;mc.player.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);}
+    else mc.player.setDeltaMovement(left.length()>.6?left.normalize().scale(.6):left);
+   }
+  }
   if(gotoTicks>0){
    double dx=gotoX-mc.player.getX(),dz=gotoZ-mc.player.getZ();
    if(--gotoTicks==0||Math.hypot(dx,dz)<.35){gotoTicks=0;mc.options.keyUp.setDown(false);}
@@ -46,14 +57,36 @@ public final class Dev {
    else{face(mc,digAt.getX()+.5,digAt.getY()+.5,digAt.getZ()+.5);mc.gameMode.continueDestroyBlock(digAt,net.minecraft.core.Direction.UP);mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);}
   }
  }
+ private static final java.util.ArrayDeque<Integer> handedOut=new java.util.ArrayDeque<>();
  /** Puts the named item in the hand: selects its hotbar slot, or swaps it in from the pack. */
- private static boolean hold(Minecraft mc,String id){
+ private static boolean hold(Minecraft mc,String id,java.util.Set<String> spare){
   var bag=mc.player.getInventory();
   if(mc.player.containerMenu!=mc.player.inventoryMenu)mc.player.closeContainer(); // a server menu left open would swallow the swap
   for(int i=0;i<36;i++)if(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(bag.getItem(i).getItem()).toString().equals(id)){
    if(i<9)bag.setSelectedSlot(i);
    else mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,i,bag.getSelectedSlot(),net.minecraft.world.inventory.ContainerInput.SWAP,mc.player);
    return true;
+  }
+  if(mc.player.isCreative()){
+   // Creative mode hands out any item, as picking it from the creative inventory would.
+   var item=net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(net.minecraft.resources.Identifier.parse(id));
+   if(item==net.minecraft.world.item.Items.AIR)return false;
+   // Into an empty slot, or over something this channel handed out earlier: nothing the player carries is replaced.
+   int slot=-1;
+   for(int i=0;i<36&&slot<0;i++)if(bag.getItem(i).isEmpty())slot=i;
+   if(slot<0&&!handedOut.isEmpty()){slot=handedOut.removeFirst();}
+   // After a restart: a single item of a kind the caller names as its own working material may be replaced.
+   for(int i=0;i<36&&slot<0;i++)if(bag.getItem(i).getCount()==1&&spare.contains(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(bag.getItem(i).getItem()).toString()))slot=i;
+   if(slot>=0){
+    // From the pack the item is swapped into the hand; that hotbar slot is then the one to reuse.
+    int kept=slot<9?slot:bag.getSelectedSlot();handedOut.remove((Integer)kept);handedOut.addLast(kept);
+    var stack=new net.minecraft.world.item.ItemStack(item);bag.setItem(slot,stack);
+    mc.gameMode.handleCreativeModeItemAdd(stack,slot<9?36+slot:slot);
+    if(slot<9)bag.setSelectedSlot(slot);
+    else mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,slot,bag.getSelectedSlot(),net.minecraft.world.inventory.ContainerInput.SWAP,mc.player);
+    return true;
+   }
+   return false;
   }
   return false;
  }
@@ -94,11 +127,13 @@ public final class Dev {
    }else if(q.has("slot")&&mc.player!=null){
     mc.player.getInventory().setSelectedSlot(q.get("slot").getAsInt());
    }else if(q.has("hold")&&mc.player!=null){
-    answer.addProperty("ok",hold(mc,q.get("hold").getAsString()));
+    var spare=new java.util.HashSet<String>();if(q.has("spare"))for(var e:q.getAsJsonArray("spare"))spare.add(e.getAsString());
+    answer.addProperty("ok",hold(mc,q.get("hold").getAsString(),spare));
    }else if(q.has("place")&&mc.player!=null){
     // As NativeBlocks does for the first block on Zelda ground: a click on the empty cell itself.
     var pos=block(q,"place");var hand=net.minecraft.world.InteractionHand.MAIN_HAND;
-    face(mc,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5);
+    // Pistons and repeaters take their direction from the view, which the caller set beforehand ("aimed").
+    if(!q.has("aimed"))face(mc,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5);
     answer.addProperty("ok",mc.gameMode.useItemOn(mc.player,hand,new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(pos.getX()+.5,pos.getY(),pos.getZ()+.5),net.minecraft.core.Direction.UP,pos,false)).consumesAction());
     mc.player.swing(hand,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
    }else if(q.has("useOn")&&mc.player!=null){
@@ -112,11 +147,13 @@ public final class Dev {
     answer.addProperty("ok",mc.gameMode.useItem(mc.player,net.minecraft.world.InteractionHand.MAIN_HAND).consumesAction());
    }else if(q.has("goto")&&mc.player!=null){
     var v=q.getAsJsonArray("goto");gotoX=v.get(0).getAsDouble();gotoZ=v.get(1).getAsDouble();gotoTicks=q.has("ticks")?Math.clamp(q.get("ticks").getAsInt(),1,600):200;
+   }else if(q.has("flyto")&&mc.player!=null){
+    var v=q.getAsJsonArray("flyto");flyTo=new net.minecraft.world.phys.Vec3(v.get(0).getAsDouble(),v.get(1).getAsDouble(),v.get(2).getAsDouble());flyTicks=200;
    }else if(q.has("dig")&&mc.player!=null){
     digAt=block(q,"dig");digTicks=q.has("ticks")?Math.clamp(q.get("ticks").getAsInt(),1,600):200;
     mc.gameMode.startDestroyBlock(digAt,net.minecraft.core.Direction.UP);
    }else if(q.has("stop")){
-    gotoTicks=digTicks=0;mc.options.keyUp.setDown(false);mc.gameMode.stopDestroyBlock();
+    gotoTicks=digTicks=flyTicks=0;mc.options.keyUp.setDown(false);mc.gameMode.stopDestroyBlock();
    }else if(q.has("camera")){
     mc.options.setCameraType(net.minecraft.client.CameraType.values()[q.get("camera").getAsInt()]);
    }else if(q.has("quit")){
@@ -149,17 +186,22 @@ public final class Dev {
    s.addProperty("item",mc.player.getMainHandItem().toString());s.addProperty("zeldaItem",ZeldaItems.held(mc));
    s.addProperty("rupees",mc.player.experienceLevel);
    s.addProperty("mode",mc.gameMode.getPlayerMode().getName());s.addProperty("food",mc.player.getFoodData().getFoodLevel());
-   s.addProperty("busy",gotoTicks>0||digTicks>0);s.addProperty("server",mc.getSingleplayerServer()==null);
+   s.addProperty("busy",gotoTicks>0||digTicks>0||flyTicks>0);s.addProperty("flying",mc.player.getAbilities().flying);s.addProperty("server",mc.getSingleplayerServer()==null);
    var bag=new JsonObject();
    for(int i=0;i<36;i++){var stack=mc.player.getInventory().getItem(i);if(stack.isEmpty())continue;
     var id=net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();bag.addProperty(id,(bag.has(id)?bag.get(id).getAsInt():0)+stack.getCount());}
    s.add("inventory",bag);
    // Blocks around the player, for an agent that decides from state instead of from the picture.
    var near=new JsonArray();var at=mc.player.blockPosition();
-   for(var pos:net.minecraft.core.BlockPos.betweenClosed(at.offset(-6,-3,-6),at.offset(6,3,6))){
-    var state=mc.level.getBlockState(pos);if(state.isAir()||state.is(net.minecraft.world.level.block.Blocks.LIGHT)||near.size()>=400)continue;
+   for(var pos:net.minecraft.core.BlockPos.betweenClosed(at.offset(-6,-5,-6),at.offset(6,5,6))){
+    var state=mc.level.getBlockState(pos);if(state.isAir()||state.is(net.minecraft.world.level.block.Blocks.LIGHT)||near.size()>=900)continue;
     var entry=new JsonArray();entry.add(pos.getX());entry.add(pos.getY());entry.add(pos.getZ());
-    entry.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath());near.add(entry);
+    entry.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath());
+    // Direction, delay and power of redstone parts, so a build can be checked without the picture.
+    var text=state.toString();int bracket=text.indexOf('[');
+    if(bracket>0&&(state.getBlock() instanceof net.minecraft.world.level.block.piston.PistonBaseBlock||state.getBlock() instanceof net.minecraft.world.level.block.DiodeBlock
+      ||state.getBlock() instanceof net.minecraft.world.level.block.ButtonBlock||state.getBlock() instanceof net.minecraft.world.level.block.RedstoneWireBlock))entry.add(text.substring(bracket));
+    near.add(entry);
    }
    s.add("blocks",near);
    try{
