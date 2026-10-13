@@ -30,8 +30,8 @@ Each decision is appended to `.local/agent/journal.jsonl`; one screenshot a minu
     python3 tools/agent.py run --backend script # no model: first possible action, to test the game side
     python3 tools/agent.py report
 
-The Jev key comes from `TYPESAFE_API_KEY`, or `"jev": {"key": "..."}` in `local.json`
-(never committed). `"base_url"` there points the same request at a compatible server,
+The Jev key comes from `TYPESAFE_API_KEY`, `"jev": {"key": "..."}` in `local.json`, or an
+OpenRouter key in `"openrouter-key-jev"` there (never committed). `"base_url"` there points the same request at a compatible server,
 hosted or local; `"model"` names the model.
 
 ## Blueprints
@@ -50,8 +50,9 @@ looks, and a repeater's delay is further clicks. The state the model sees is the
 position inside the blueprint, progress per part, what is in the hand, the operator's
 `focus` and `avoid` lists, and the last results.
 
-`tube` has not been built yet: its redstone follows the `ring` design, which runs, but
-the eight-lane layout itself is untested.
+`tube` was built by Jev (through OpenRouter) on 2026-10-12: 576 placements, every one
+read back, and the machine runs: eight generators, a 10 s clock, the four banks of
+pistons 2 s apart.
 
 ## The operator
 
@@ -68,6 +69,23 @@ on a timer. Its whole interface is four commands and the brief.
 
 An operator tick is: `observe`, look at the frames it lists, change the brief, optionally
 `remember` and `say`. The controller reads the brief again before every decision.
+
+## What serving Jev taught
+
+- It answers in about 0.3 s; about 30 decisions a minute once the game's own delays are counted.
+- It weighs the wording of the options more than rules sent in the state. Rules belong
+  in the question's instructions, and an option that should not be taken now should not
+  be offered: beside placements in reach it chose "fly to part X" for 140 decisions, and
+  beside a repair it chose a flight five times running.
+- Two equally good options give a confidence near 0.4. That is not doubt; hand back on a
+  flat spread over many options, on repeated identical failures, or when nothing is left.
+- Only offer what can be confirmed. A placement outside the reported block box read as a
+  failure, was repeated, and put a second block on top of the first.
+- The state needs where the player can stand, not only where the block goes: free hover
+  spots, a path over or around the build, and the ground height. The terrain here varies
+  by several blocks and a first site had to be abandoned for it.
+- Dug ground (the server's markers) takes neither flowing water nor poured lava, so
+  machines with fluids go on the surface.
 
 ## Limits
 

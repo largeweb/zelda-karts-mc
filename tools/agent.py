@@ -288,7 +288,7 @@ class Machine:
 
 OPPOSITE = {'north': 'south', 'south': 'north', 'east': 'west', 'west': 'east', 'up': 'down', 'down': 'up'}
 VIEW = {'south': (0, 0), 'west': (90, 0), 'north': (180, 0), 'east': (-90, 0), 'down': (0, 90), 'up': (0, -90)}
-REACH = 4.4
+REACH = 5.0
 
 
 class Build:
@@ -345,12 +345,33 @@ class Build:
                     continue
             yield i, p
 
+    def in_sight(self, at):
+        """Is the cell inside the box of blocks the game reports? Only there can a placement be confirmed."""
+        return abs(at[0] - math.floor(self.status['x'])) <= 6 and abs(at[1] - math.floor(self.status['y'])) <= 5 \
+            and abs(at[2] - math.floor(self.status['z'])) <= 6
+
     def reach(self, at):
         return math.dist(self.eye, (at[0] + .5, at[1] + .5, at[2] + .5))
 
     def stand(self, p):
+        """A spot to hover at from which the cell can be worked: free of blocks, above the ground, within reach.
+        Directly above the cell first (a pour needs that), then beside it, then further out and higher."""
         at = self.world(p['at'])
-        return [at[0] + .5, max(at[1] + 1.3, self.site[1] + .1), at[2] + .5]
+        solid = {tuple(self.world(q['at'])) for i, q in enumerate(self.plan) if i in self.placed and not q['pour']}
+        solid |= {cell for cell, (name, _) in self.seen.items() if name not in ('water', 'lava')}
+        ground = self.site[1] - 2  # the blueprint's lowest layer stands on the ground
+
+        def free(x, y, z):
+            return y >= ground + .5 and not any((math.floor(x + dx), math.floor(y + dy), math.floor(z + dz)) in solid
+                                                for dx in (-.3, .3) for dz in (-.3, .3) for dy in (0, .9, 1.79))
+        spots = [(0, 1.3, 0)] if p['pour'] else \
+            [(dx, dy, dz) for dy in (1.3, .3, 2.3, -.7, 3.3) for dx, dz in ((0, 0), (0, -2), (0, 2), (-2, 0), (2, 0), (-2, -2), (2, 2), (-2, 2), (2, -2),
+                                                                         (0, -3), (0, 3), (-3, 0), (3, 0))]
+        for dx, dy, dz in spots:
+            x, y, z = at[0] + .5 + dx, at[1] + dy, at[2] + .5 + dz
+            if free(x, y, z) and math.dist((x, y + 1.62, z), (at[0] + .5, at[1] + .5, at[2] + .5)) < REACH - .4:
+                return [x, y, z]
+        return [at[0] + .5, at[1] + 1.3, at[2] + .5]
 
     def above(self, p):
         at = self.world(p['at'])
@@ -383,10 +404,14 @@ class Build:
             at = self.world(self.plan[i]['at'])
             if self.reach(at) < REACH:
                 out[f'remove_{i}'] = (f"Break the {name} standing where a {self.plan[i]['block']} belongs ({self.plan[i]['part']}).", {'dig': at})
+        if self.wrong and not out:
+            i = min(self.wrong, key=lambda i: self.reach(self.world(self.plan[i]['at'])))
+            out['fly_to_wrong_block'] = (f"Fly to the {self.wrong[i]} standing where a {self.plan[i]['block']} belongs, to break it.",
+                                         {'flyto': self.stand(self.plan[i])})
         ready = sorted(self.ready(), key=lambda entry: self.reach(self.world(entry[1]['at'])))
         focus = [entry for entry in ready if entry[1]['part'] in self.brief['focus']]
         near = [(i, p) for i, p in (focus + ready) if i not in self.wrong and self.reach(self.world(p['at'])) < REACH
-                and (not p['pour'] or self.above(p))]
+                and self.in_sight(self.world(p['at'])) and (not p['pour'] or self.above(p))]
         for i, p in list(dict(near).items())[:10]:
             at = self.world(p['at'])
             how = {'hold': p['item'], 'verify': i}
@@ -400,10 +425,16 @@ class Build:
                     how['clicks'], what = p['delay'] - 1, what + f", set to {p['delay']} ticks"
                 out[f'place_{i}'] = (f'Place {what}.', {**how, 'place': at})
         parts = {}
+        fixing = any(key.startswith('remove_') for key in out)
         for i, p in ready:
-            parts.setdefault(p['part'], (i, p))
+            if i not in self.wrong:  # a cell holding the wrong block is a removal first, wherever the player is
+                parts.setdefault(p['part'], (i, p))
         for part, (i, p) in parts.items():
-            if not any(q['part'] == part for _, q in near):
+            # Offered only when nothing can be placed from here, or the operator asked for this part: given the
+            # choice, the model flew between two parts for minutes with placements in reach at both.
+            if fixing:
+                continue  # the model prefers any flight to a removal: with a wrong block in reach, that comes first
+            if not near or (part in self.brief['focus'] and not any(q['part'] == part for _, q in near)):
                 left = sum(1 for _, q in ready if q['part'] == part)
                 note = ' The operator asked for this part first.' if part in self.brief['focus'] else ''
                 out[f'fly_to_{part}'] = (f'Fly to the nearest unfinished cell of {part} ({left} ready to place there).{note}', {'flyto': self.stand(p)})
@@ -437,18 +468,24 @@ class Jev:
     name = 'jev'
 
     def __init__(self):
-        settings = local_settings().get('jev', {})
+        local = local_settings()
+        settings = local.get('jev', {})
         self.key = os.environ.get('TYPESAFE_API_KEY') or settings.get('key')
-        self.url = (os.environ.get('TYPESAFE_BASE_URL') or settings.get('base_url') or 'https://api.typesafe.ai').rstrip('/') + '/v1/systemone'
+        base = os.environ.get('TYPESAFE_BASE_URL') or settings.get('base_url') or 'https://api.typesafe.ai'
         self.model = settings.get('model', 'jev-latest')
+        if not self.key and local.get('openrouter-key-jev'):
+            # OpenRouter serves Jev under the same request, at its own address and model name.
+            self.key, base, self.model = local['openrouter-key-jev'], 'https://openrouter.ai/api', settings.get('model', 'typesafe/jev-1.13')
+        self.url = base.rstrip('/') + '/v1/systemone'
         if not self.key and 'api.typesafe.ai' in self.url:
-            raise SystemExit('No Jev key: set TYPESAFE_API_KEY, or "jev": {"key": "..."} in local.json (keys come from console.typesafe.ai).')
+            raise SystemExit('No Jev key: set TYPESAFE_API_KEY, "jev": {"key": "..."} or "openrouter-key-jev" in local.json.')
         self.tokens = 0
 
     def decide(self, state, options):
         body = {'model': self.model, 'state': state, 'questions': {
             'action': {'type': 'choice', 'instructions': 'Choose the one action that best advances the objective from the current facts. '
-                       'Respect the rules and the planner notes. Prefer finishing what the plot needs next over waiting.',
+                       'Prefer doing the work that is within reach over moving, and moving over waiting. Rules: '
+                       + ' '.join(str(rule).rstrip('.') + '.' for rule in state.get('rules', [])),
                        'criteria': {key: text for key, (text, _) in options.items()}},
             'stuck': {'type': 'noul', 'instructions': 'Do the recent results show the same action failing repeatedly, so that the planner should step in?'},
             'danger': {'type': 'score', 'instructions': 'How much danger is the player in right now?',
@@ -458,11 +495,19 @@ class Jev:
         if self.key:
             headers['Authorization'] = 'Bearer ' + self.key
         request = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
-        try:
-            with urllib.request.urlopen(request, timeout=20) as reply:
-                answer = json.load(reply)
-        except urllib.error.HTTPError as e:
-            raise SystemExit(f'Decision model refused the request: {e.code} {e.read()[:300].decode(errors="replace")}')
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=15) as reply:
+                    answer = json.load(reply)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code < 500 and e.code != 429:
+                    raise SystemExit(f'Decision model refused the request: {e.code} {e.read()[:300].decode(errors="replace")}')
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass  # the network, not the request: try again
+            time.sleep(2 * (attempt + 1))
+        else:
+            raise SystemExit('The decision model could not be reached in five tries.')
         self.tokens += answer.get('usage', {}).get('input_tokens', 0)
         answers = answer['answers']
         return {'action': answers['action']['choice'], 'confidence': answers['action'].get('confidence'),
@@ -492,11 +537,35 @@ def carry_out(game, how, memory):
         return 'reported'
     if 'flyto' in how:
         game.send(flyto=how['flyto'])
-        for _ in range(110):
+        game.fresh()  # a report from after the command: an older one still says "not busy"
+        for _ in range(110):  # the game ends the flight itself: there, on touching the ground, or after ten seconds
             time.sleep(.1)
             if not game.status().get('busy'):
                 break
+        game.send(stop=True)
         status = game.fresh()
+        if math.dist((status['x'], status['y'], status['z']), how['flyto']) > 1 and not how.get('over') and 'brief' in memory:
+            # Something is in the way. Up over the build, across and down onto the spot; failing that, down
+            # outside the build and in from the side at the spot's own height.
+            site, (x, y, z) = memory['brief']['site'], how['flyto']
+            # Boxed in (inside the spiral, under a shelf): sideways out first, whichever way is open.
+            for dx, dz in ((3, 0), (-3, 0), (0, 3), (0, -3)):
+                here = (status['x'], status['y'], status['z'])
+                carry_out(game, {'flyto': [here[0] + dx, here[1], here[2] + dz], 'over': True}, memory)
+                status = game.fresh()
+                if math.dist((status['x'], status['y'], status['z']), here) > 2:
+                    break
+            high = site[1] + 17
+            away = (x - site[0] - 4, z - site[2] - 6)
+            scale = 6 / max(math.hypot(*away), .1)
+            out = (x + away[0] * scale, z + away[1] * scale)
+            for legs in ([[status['x'], high, status['z']], [x, high, z], [x, y, z]],
+                         [[x, high, z], [out[0], high, out[1]], [out[0], y, out[1]], [x, y, z]]):
+                for leg in legs:
+                    carry_out(game, {'flyto': leg, 'over': True}, memory)
+                status = game.fresh()
+                if math.dist((status['x'], status['y'], status['z']), how['flyto']) <= 1:
+                    break
         return f"now {math.dist((status['x'], status['y'], status['z']), how['flyto']):.1f} blocks from that spot"
     if 'verify' in how:
         # One hand placement: item, view, click, the repeater's delay; then the game says what stands there.
@@ -607,7 +676,7 @@ def observe():
                                        'probabilities': e.get('probabilities')} for e in low[-5:]],
         'new_messages': [json.loads(line) for line in messages[seen:]],
         'memory': NOTES.read_text() if NOTES.is_file() else '',
-        'frames': [str(f) for f in sorted((SESSION / 'screenshots').glob('agent-*.png'))[-5:]],
+        'frames': [str(f) for f in sorted((SESSION / 'screenshots').glob('agent-1*.png'))[-5:]],
     }
 
 
@@ -617,13 +686,19 @@ def journal(entry):
         out.write(json.dumps(entry) + '\n')
 
 
-def frame(game, last):
+def frame(game, last, centre=None):
     """One picture a minute, the last five kept: for the planner, not for the controller."""
     if time.time() - last < 60:
         return last
     name = f'agent-{int(time.time())}.png'
+    if centre:
+        # Looking down at the cell just placed shows the operator nothing: turn to the middle of the work first.
+        status = game.status()
+        dx, dy, dz = centre[0] - status['x'], centre[1] - status['y'] - 1.62, centre[2] - status['z']
+        game.send(view=[math.degrees(math.atan2(-dx, dz)), -math.degrees(math.atan2(dy, math.hypot(dx, dz)))])
+        time.sleep(.3)
     game.send(screenshot=name)
-    for old in sorted((SESSION / 'screenshots').glob('agent-*.png'))[:-5]:
+    for old in sorted((SESSION / 'screenshots').glob('agent-1*.png'))[:-5]:
         old.unlink()
     return time.time()
 
@@ -666,6 +741,7 @@ def run_once(args):
         # What stood when the controller last ran; corrected from the blocks in sight as the player moves.
         saved = json.loads(PLACED.read_text()) if PLACED.is_file() else {}
         memory['placed'] = set(saved['placed']) if saved.get('site') == brief['site'] else set()
+        memory['started'] = saved.get('site') == brief['site'] and bool(saved.get('started'))
     elif brief['build'] == 'ring':
         # Which parts already stand, from an earlier run.
         machine = Machine(brief, status, memory)
@@ -678,12 +754,12 @@ def run_once(args):
         memory['claimed_here'] = memory['claimed_here'] and memory['land'] > 0
     print(f"Brief: {brief['objective']}\nSite {brief['site']}, backend {backend.name}.")
     for step in range(args.steps):
-        last_frame = frame(game, last_frame)
+        last_frame = frame(game, last_frame, [brief['site'][0] + 4, brief['site'][1] + 4, brief['site'][2] + 6] if brief['build'] == 'tube' else None)
         if BRIEF.is_file():
             brief.update(json.loads(BRIEF.read_text()))  # the operator may have changed it since the last step
         memory['brief'] = brief
         if 'placed' in memory:
-            PLACED.write_text(json.dumps({'site': brief['site'], 'placed': sorted(memory['placed'])}))
+            PLACED.write_text(json.dumps({'site': brief['site'], 'placed': sorted(memory['placed']), 'started': bool(memory.get('started'))}))
         world = {'ring': Machine, 'tube': Build}.get(brief['build'], World)(brief, game.fresh(), memory)
         if world.done():
             journal({'time': time.time(), 'step': step, 'outcome': 'done', 'facts': world.facts()})
@@ -703,7 +779,8 @@ def run_once(args):
         key = decision['action'] if decision['action'] in options else 'wait'
         text, how = options[key]
         confidence = decision.get('confidence')
-        low = low + 1 if confidence is not None and confidence < .35 else 0
+        # Two good options close together is not doubt; a spread-out choice among many is.
+        low = low + 1 if decision.get('probabilities') and max(decision['probabilities'].values()) < .2 else 0
         if 'stop' in how or low >= 3 or (decision.get('stuck') or 0) > .85:
             journal({'time': time.time(), 'step': step, 'outcome': 'needs_planner', 'decision': decision, 'facts': world.facts(), 'recent': recent[-6:]})
             print('Stopped for the planner: see agent.py report.')

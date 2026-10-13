@@ -43,8 +43,14 @@ public final class Dev {
    if(!abilities.mayfly){flyTicks=0;}
    else{
     if(!abilities.flying){abilities.flying=true;mc.player.onUpdateAbilities();}
-    if(--flyTicks==0||left.length()<.15){flyTicks=0;mc.player.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);}
-    else mc.player.setDeltaMovement(left.length()>.6?left.normalize().scale(.6):left);
+    // Up by speed, down with the sneak key as a player does (a set downward speed alone does not sink). Touching
+    // the ground would end the flight, so a target at or under the ground becomes a hover just above it.
+    if(mc.player.onGround()){flyTo=new net.minecraft.world.phys.Vec3(flyTo.x,Math.max(flyTo.y,mc.player.getY()+.5),flyTo.z);left=flyTo.subtract(mc.player.position());}
+    boolean there=--flyTicks==0||left.length()<.15;
+    mc.options.keyShift.setDown(!there&&left.y<-.12&&!mc.player.onGround());
+    if(there){flyTicks=0;mc.player.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);}
+    else{var level=new net.minecraft.world.phys.Vec3(left.x,0,left.z);var speed=level.length()>.6?level.normalize().scale(.6):level;
+     mc.player.setDeltaMovement(speed.x,left.y>0?Math.min(.5,Math.max(left.y,.1)):left.y>-.12?left.y:mc.player.getDeltaMovement().y,speed.z);}
    }
   }
   if(gotoTicks>0){
@@ -153,7 +159,7 @@ public final class Dev {
     digAt=block(q,"dig");digTicks=q.has("ticks")?Math.clamp(q.get("ticks").getAsInt(),1,600):200;
     mc.gameMode.startDestroyBlock(digAt,net.minecraft.core.Direction.UP);
    }else if(q.has("stop")){
-    gotoTicks=digTicks=flyTicks=0;mc.options.keyUp.setDown(false);mc.gameMode.stopDestroyBlock();
+    gotoTicks=digTicks=flyTicks=0;mc.options.keyUp.setDown(false);mc.options.keyJump.setDown(false);mc.options.keyShift.setDown(false);mc.gameMode.stopDestroyBlock();
    }else if(q.has("camera")){
     mc.options.setCameraType(net.minecraft.client.CameraType.values()[q.get("camera").getAsInt()]);
    }else if(q.has("quit")){
