@@ -22,6 +22,9 @@ from pathlib import Path
 
 import ring
 import tube
+import homestead
+
+BLUEPRINTS = {'tube': tube, 'homestead': homestead}
 
 ROOT = Path(__file__).resolve().parents[1]
 SESSION = ROOT / '.local/session'
@@ -298,21 +301,39 @@ class Build:
     def __init__(self, brief, status, memory):
         self.brief, self.status, self.memory = brief, status, memory
         self.site = tuple(brief['site'])
-        self.plan = tube.placements()
+        self.bp = BLUEPRINTS[brief['build']]
+        self.plan = self.bp.placements()
+        for p in self.plan:
+            p.setdefault('kind', 'pour' if p['pour'] else 'place')
+            p.setdefault('on', p['pour'] or p['block'] in ('repeater', 'redstone_wire', 'stone_button'))
+            for key in ('grows', 'zone'):
+                p.setdefault(key, None)
+            p.setdefault('expect', f"facing={OPPOSITE[p['look']]}" if p['look'] else None)
+        self.ground = self.site[1] + getattr(self.bp, 'GROUND', -2)
+        memory['spare'] = sorted({p['item'] for p in self.plan if p['item']})
         self.placed = memory.setdefault('placed', set())
+        self.once = memory.setdefault('once', set())  # placed and then left to the game: plants grow, animals wander
         self.wrong = {}
         self.seen = {(x, y, z): (name, extra[0] if extra else '') for x, y, z, name, *extra in status.get('blocks', [])}
         px, py, pz = math.floor(status['x']), math.floor(status['y']), math.floor(status['z'])
+        to_dig = {p['at'] for p in self.plan if p['kind'] == 'dig'}  # what stands there now is ground: it is dug, not corrected
         for index, p in enumerate(self.plan):
             at = self.world(p['at'])
             if abs(at[0] - px) > 6 or abs(at[1] - py) > 5 or abs(at[2] - pz) > 6:
                 continue  # out of sight: what was seen last stands
+            if index in self.once:
+                self.placed.add(index)
+                continue
             found = self.seen.get(tuple(at))
             if found and self.right(p, found):
                 self.placed.add(index)
+                if p['grows'] or p['kind'] == 'dig':  # a dug cell is filled again by the blocks put into it
+                    self.once.add(index)
             else:
                 self.placed.discard(index)
-                if found and not (p['pour'] and found[0] in ('water', 'lava')):
+                # A dug cell is empty space; fluids come and go; a cell still to be dug holds whatever the ground was lined with.
+                if found and p['kind'] == 'place' and found[0] not in ('light', 'water', 'lava') and p['at'] not in to_dig \
+                        and p['part'] not in brief['avoid']:
                     self.wrong[index] = found[0]
         self.eye = (status['x'], status['y'] + 1.62, status['z'])
 
@@ -324,26 +345,37 @@ class Build:
         name, props = found
         if name != p['block']:
             return False
-        if p['look'] and f"facing={OPPOSITE[p['look']]}" not in props:
+        if p.get('expect') and p['expect'] not in props:
             return False
         return not p['delay'] or f"delay={p['delay']}" in props
 
     def complete(self, part):
         return all(i in self.placed for i, p in enumerate(self.plan) if p['part'] == part)
 
+    def open_parts(self):
+        return {part for part in {p['part'] for p in self.plan}
+                if all(self.complete(need) for need in self.bp.NEEDS.get(part, [])) and part not in self.brief['avoid']}
+
     def ready(self):
         """Placements that can be made now: their part's prerequisites stand, and so does what they rest on."""
         index = {p['at']: i for i, p in enumerate(self.plan)}
-        open_parts = {part for part in {p['part'] for p in self.plan}
-                      if all(self.complete(need) for need in tube.NEEDS.get(part, [])) and part not in self.brief['avoid']}
+        open_parts = self.open_parts()
         for i, p in enumerate(self.plan):
             if i in self.placed or p['part'] not in open_parts:
                 continue
-            below = index.get((p['at'][0], p['at'][1] - 1, p['at'][2]))
-            if p['block'] in ('repeater', 'redstone_wire', 'stone_button') or p['pour']:
-                if below is None or below not in self.placed:
+            under = (p['at'][0], p['at'][1] - 1, p['at'][2])
+            below = [i for i, q in enumerate(self.plan) if q['at'] == under and q['kind'] == 'place']
+            if p['on']:
+                # What it stands on: the blueprint's own block there, or whatever the ground was lined with.
+                standing = any(i in self.placed for i in below) or (not below and self.seen.get(tuple(self.world(under)), ('light',))[0] != 'light')
+                if not standing:
                     continue
             yield i, p
+
+    def inside(self, at):
+        """Does the player's body overlap the cell? Nothing can be put there until the player moves."""
+        x, y, z = self.status['x'], self.status['y'], self.status['z']
+        return at[0] - .3 < x < at[0] + 1.3 and at[2] - .3 < z < at[2] + 1.3 and at[1] - 1.8 < y < at[1] + 1.55
 
     def in_sight(self, at):
         """Is the cell inside the box of blocks the game reports? Only there can a placement be confirmed."""
@@ -357,15 +389,29 @@ class Build:
         """A spot to hover at from which the cell can be worked: free of blocks, above the ground, within reach.
         Directly above the cell first (a pour needs that), then beside it, then further out and higher."""
         at = self.world(p['at'])
-        solid = {tuple(self.world(q['at'])) for i, q in enumerate(self.plan) if i in self.placed and not q['pour']}
-        solid |= {cell for cell, (name, _) in self.seen.items() if name not in ('water', 'lava')}
-        ground = self.site[1] - 2  # the blueprint's lowest layer stands on the ground
+        solid = {tuple(self.world(q['at'])) for i, q in enumerate(self.plan) if i in self.placed and q['kind'] == 'place'}
+        solid |= {cell for cell, (name, _) in self.seen.items() if name not in ('water', 'lava', 'light')}
+        ground = self.ground if not p['zone'] else self.site[1] - 64
+        if p['kind'] == 'place':
+            solid.add(tuple(at))  # not in the cell itself: a block cannot be put where the player is
+        if p['kind'] == 'dig':
+            # From just above the ground, over the cell: every layer of the cellar is in sight from there.
+            return [at[0] + .5, self.ground + .6, at[2] + .5]
 
         def free(x, y, z):
             return y >= ground + .5 and not any((math.floor(x + dx), math.floor(y + dy), math.floor(z + dz)) in solid
                                                 for dx in (-.3, .3) for dz in (-.3, .3) for dy in (0, .9, 1.79))
-        spots = [(0, 1.3, 0)] if p['pour'] else \
-            [(dx, dy, dz) for dy in (1.3, .3, 2.3, -.7, 3.3) for dx, dz in ((0, 0), (0, -2), (0, 2), (-2, 0), (2, 0), (-2, -2), (2, 2), (-2, 2), (2, -2),
+        if p['zone'] and hasattr(self.bp, 'ROOM') and not p['pour']:
+            # Underground only the dug room is open: the nearest free floor spot in it from which the cell is in reach.
+            (x0, x1), (z0, z1), feet = self.bp.ROOM
+            spots = [(self.site[0] + x + .5, self.site[1] + feet + .05, self.site[2] + z + .5) for x in range(x0, x1 + 1) for z in range(z0, z1 + 1)]
+            centre = (at[0] + .5, at[1] + .5, at[2] + .5)
+            for x, y, z in sorted(spots, key=lambda spot: math.dist(spot, centre)):
+                clear = not (at[0] - .3 < x < at[0] + 1.3 and at[2] - .3 < z < at[2] + 1.3 and at[1] - 1.8 < y < at[1] + 1)
+                if clear and free(x, y, z) and math.dist((x, y + 1.62, z), centre) < REACH - .4:
+                    return [x, y, z]
+        spots = [(0, 1.6, 0), (0, 2.6, 0)] if p['pour'] else \
+            [(dx, dy, dz) for dy in (1.6, .3, 2.6, -.7, 3.6) for dx, dz in ((0, 0), (0, -2), (0, 2), (-2, 0), (2, 0), (-2, -2), (2, 2), (-2, 2), (2, -2),
                                                                          (0, -3), (0, 3), (-3, 0), (3, 0))]
         for dx, dy, dz in spots:
             x, y, z = at[0] + .5 + dx, at[1] + dy, at[2] + .5 + dz
@@ -392,7 +438,20 @@ class Build:
                 'clock_started': bool(self.memory.get('started')), 'cobblestone_made': bool(self.memory.get('running'))}
 
     def done(self):
-        return bool(self.memory.get('running'))
+        return bool(self.memory.get('running')) or (not hasattr(self.bp, 'BUTTON') and len(self.placed) == len(self.plan))
+
+    def zone(self):
+        return 'base' if self.status['y'] < self.ground - 1 else None
+
+    def fly(self, p):
+        """How to get to where p can be worked: through the shaft when the cellar is on the other side."""
+        how = {'flyto': self.stand(p)}
+        if p['zone']:
+            how['over'] = True  # underground there is no way round: go straight, and let reach decide if that is near enough
+        if self.zone() != p['zone'] and hasattr(self.bp, 'PORTAL'):
+            points = [[self.site[0] + x, self.site[1] + y, self.site[2] + z] for x, y, z in self.bp.PORTAL]
+            how['route'] = points if p['zone'] else points[::-1]
+        return how
 
     def options(self):
         out = {}
@@ -400,6 +459,8 @@ class Build:
             out['set_game_mode'] = ('Switch to creative mode: this build needs flight and unlimited items.', {'run': 'gamemode creative'})
             out['ask_planner'] = ('Stop and hand back to the operator.', {'stop': 'planner'})
             return out
+        open_parts = self.open_parts()
+        self.wrong = {i: name for i, name in self.wrong.items() if self.plan[i]['part'] in open_parts}  # not before its turn
         for i, name in sorted(self.wrong.items(), key=lambda entry: self.reach(self.world(self.plan[entry[0]]['at'])))[:3]:
             at = self.world(self.plan[i]['at'])
             if self.reach(at) < REACH:
@@ -407,15 +468,22 @@ class Build:
         if self.wrong and not out:
             i = min(self.wrong, key=lambda i: self.reach(self.world(self.plan[i]['at'])))
             out['fly_to_wrong_block'] = (f"Fly to the {self.wrong[i]} standing where a {self.plan[i]['block']} belongs, to break it.",
-                                         {'flyto': self.stand(self.plan[i])})
+                                         self.fly(self.plan[i]))
         ready = sorted(self.ready(), key=lambda entry: self.reach(self.world(entry[1]['at'])))
         focus = [entry for entry in ready if entry[1]['part'] in self.brief['focus']]
-        near = [(i, p) for i, p in (focus + ready) if i not in self.wrong and self.reach(self.world(p['at'])) < REACH
-                and self.in_sight(self.world(p['at'])) and (not p['pour'] or self.above(p))]
+        near = [(i, p) for i, p in (focus + ready) if i not in self.wrong and self.reach(self.world(p['at'])) < (9 if p['kind'] == 'dig' else REACH)
+                and self.in_sight(self.world(p['at'])) and (not p['pour'] or self.above(p)) and self.zone() == p['zone']
+                and not (p['kind'] == 'place' and self.inside(self.world(p['at'])))]
         for i, p in list(dict(near).items())[:10]:
             at = self.world(p['at'])
             how = {'hold': p['item'], 'verify': i}
             what = f"{p['block']} for {p['part']} at {list(p['at'])}, {self.reach(at):.1f} blocks away"
+            if p['kind'] == 'dig':
+                out[f'dig_{i}'] = (f"Dig out the cell at {list(p['at'])} for {p['part']}.", {'digcmd': 'hyrule dig %d %d %d 0' % tuple(at), 'verify': i})
+                continue
+            if p['kind'] == 'egg':
+                out[f'release_{i}'] = (f"Release a {p['block']} into the pen at {list(p['at'])}.", {'hold': p['item'], 'egg': [at[0], at[1] - 1, at[2]], 'once': i})
+                continue
             if p['pour']:
                 out[f'pour_{i}'] = (f'Pour {what}.', {**how, 'pour': [at[0], at[1] - 1, at[2]]})
             else:
@@ -437,9 +505,9 @@ class Build:
             if not near or (part in self.brief['focus'] and not any(q['part'] == part for _, q in near)):
                 left = sum(1 for _, q in ready if q['part'] == part)
                 note = ' The operator asked for this part first.' if part in self.brief['focus'] else ''
-                out[f'fly_to_{part}'] = (f'Fly to the nearest unfinished cell of {part} ({left} ready to place there).{note}', {'flyto': self.stand(p)})
-        if len(self.placed) == len(self.plan):
-            button, first = self.world(tube.BUTTON), self.world(tube.FIRST)
+                out[f'fly_to_{part}'] = (f'Fly to the nearest unfinished cell of {part} ({left} ready to place there).{note}', self.fly(p))
+        if len(self.placed) == len(self.plan) and hasattr(self.bp, 'BUTTON'):
+            button, first = self.world(self.bp.BUTTON), self.world(self.bp.FIRST)
             if not self.memory.get('started'):
                 if self.reach(button) < REACH:
                     out['press_button'] = ('Press the stone button once to start the clock.', {'useOn': button, 'started': True})
@@ -535,6 +603,10 @@ def carry_out(game, how, memory):
     if 'running' in how:
         memory['running'] = True
         return 'reported'
+    if 'route' in how:
+        for point in how['route']:
+            carry_out(game, {'flyto': point, 'over': True}, memory)
+        how = {'flyto': how['flyto'], 'over': True}
     if 'flyto' in how:
         game.send(flyto=how['flyto'])
         game.fresh()  # a report from after the command: an older one still says "not busy"
@@ -567,9 +639,22 @@ def carry_out(game, how, memory):
                 if math.dist((status['x'], status['y'], status['z']), how['flyto']) <= 1:
                     break
         return f"now {math.dist((status['x'], status['y'], status['z']), how['flyto']):.1f} blocks from that spot"
+    if 'egg' in how:
+        if not game.send(hold=how['hold'], spare=memory.get('spare', [])).get('ok'):
+            return f"failed: no {how['hold']} and no free slot for it"
+        time.sleep(.2)
+        game.send(useOn=how['egg'])
+        memory['once'].add(how['once'])
+        time.sleep(.3)
+        return 'released'
+    if 'digcmd' in how:
+        game.send(command=how['digcmd'])
+        time.sleep(.45)
+        world = Build(memory['brief'], game.fresh(), memory)
+        return 'dug' if how['verify'] in world.placed else 'failed: the cell is not dug'
     if 'verify' in how:
         # One hand placement: item, view, click, the repeater's delay; then the game says what stands there.
-        if not game.send(hold=how['hold'], spare=sorted({p['item'] for p in tube.placements()})).get('ok'):
+        if not game.send(hold=how['hold'], spare=memory.get('spare', [])).get('ok'):
             return f"failed: no {how['hold']} and no free slot for it"
         time.sleep(.2)
         if 'pour' in how:
@@ -737,10 +822,12 @@ def run_once(args):
     memory, recent, last_frame, low = {'site': brief['site']}, [], 0, 0
     claimed = HOME / 'claimed.json'
     memory['claimed_here'] = claimed.is_file() and json.loads(claimed.read_text()) == brief['site']
-    if brief['build'] == 'tube':
+    if brief['build'] in BLUEPRINTS:
         # What stood when the controller last ran; corrected from the blocks in sight as the player moves.
         saved = json.loads(PLACED.read_text()) if PLACED.is_file() else {}
-        memory['placed'] = set(saved['placed']) if saved.get('site') == brief['site'] else set()
+        if saved.get('site') != brief['site'] or saved.get('build', 'tube') != brief['build']:
+            saved = {}
+        memory['placed'], memory['once'] = set(saved.get('placed', [])), set(saved.get('once', []))
         memory['started'] = saved.get('site') == brief['site'] and bool(saved.get('started'))
     elif brief['build'] == 'ring':
         # Which parts already stand, from an earlier run.
@@ -754,13 +841,14 @@ def run_once(args):
         memory['claimed_here'] = memory['claimed_here'] and memory['land'] > 0
     print(f"Brief: {brief['objective']}\nSite {brief['site']}, backend {backend.name}.")
     for step in range(args.steps):
-        last_frame = frame(game, last_frame, [brief['site'][0] + 4, brief['site'][1] + 4, brief['site'][2] + 6] if brief['build'] == 'tube' else None)
+        last_frame = frame(game, last_frame, [brief['site'][0] + 4, brief['site'][1] + 3, brief['site'][2] + 8] if brief['build'] in BLUEPRINTS else None)
         if BRIEF.is_file():
             brief.update(json.loads(BRIEF.read_text()))  # the operator may have changed it since the last step
         memory['brief'] = brief
         if 'placed' in memory:
-            PLACED.write_text(json.dumps({'site': brief['site'], 'placed': sorted(memory['placed']), 'started': bool(memory.get('started'))}))
-        world = {'ring': Machine, 'tube': Build}.get(brief['build'], World)(brief, game.fresh(), memory)
+            PLACED.write_text(json.dumps({'site': brief['site'], 'build': brief['build'], 'placed': sorted(memory['placed']),
+                                          'once': sorted(memory.get('once', [])), 'started': bool(memory.get('started'))}))
+        world = {'ring': Machine, 'tube': Build, 'homestead': Build}.get(brief['build'], World)(brief, game.fresh(), memory)
         if world.done():
             journal({'time': time.time(), 'step': step, 'outcome': 'done', 'facts': world.facts()})
             print(f'Done after {step} decisions.' + (f' {backend.tokens} input tokens.' if hasattr(backend, 'tokens') else ''))
@@ -779,9 +867,10 @@ def run_once(args):
         key = decision['action'] if decision['action'] in options else 'wait'
         text, how = options[key]
         confidence = decision.get('confidence')
-        # Two good options close together is not doubt; a spread-out choice among many is.
-        low = low + 1 if decision.get('probabilities') and max(decision['probabilities'].values()) < .2 else 0
-        if 'stop' in how or low >= 3 or (decision.get('stuck') or 0) > .85:
+        # Many equally good options (ten cells to dig) spread the probability thin without any doubt: only choosing
+        # to wait or to hand back while work is on offer counts.
+        low = low + 1 if key in ('wait', 'ask_planner') and len(options) > 2 else 0
+        if low >= 3 or (decision.get('stuck') or 0) > .85:
             journal({'time': time.time(), 'step': step, 'outcome': 'needs_planner', 'decision': decision, 'facts': world.facts(), 'recent': recent[-6:]})
             print('Stopped for the planner: see agent.py report.')
             return 'waiting for the operator: the model is unsure or reports being stuck'

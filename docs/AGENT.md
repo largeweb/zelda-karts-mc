@@ -41,6 +41,7 @@ hosted or local; `"model"` names the model.
 | `farm` | 3x3 irrigated plot, a faction, a claim (survival) | by hand; `/kit farmer` supplies it |
 | `ring` | one cobblestone generator feeding a self-repairing ring (`tools/ring.py`) | by `/setblock` and `/fill`, a part at a time: a test of the design, not of the player |
 | `tube` | eight generators feeding a wall, ceiling, wall and floor, eight wide, over a lava pit (`tools/tube.py`) | by hand in creative: 576 placements, each read back from the game |
+| `homestead` | a cellar base dug under intact ground, a house over it, a well, five farms and a stocked pen (`tools/homestead.py`) | by hand in creative: 852 entries, which also dig cells and release animals |
 
 For `tube` the model chooses among the nearest cells that can be placed now (their
 part's prerequisites stand, and so does the block under them), flying to another part,
@@ -86,6 +87,20 @@ An operator tick is: `observe`, look at the frames it lists, change the brief, o
   by several blocks and a first site had to be abandoned for it.
 - Dug ground (the server's markers) takes neither flowing water nor poured lava, so
   machines with fluids go on the surface.
+
+## What the homestead taught
+
+- Underground rooms: dig from the layer under the ground down with the server's dig command and the
+  ground above stays whole. Blocks go into dug cells; a water bucket waterlogs one; water does not flow in.
+- Soil, sand and water in the layer just under the Zelda ground are hidden by it, so crops and fences
+  appear to stand on Hyrule's own grass. Sand there needs a block beneath or it falls into the void.
+- Hyrule sits at y=1024, where every temperate biome is below freezing: open water turns to ice. The
+  claimed area was set to savanna with /fillbiome.
+- Farmland dries to dirt within a minute: water first, soil after.
+- Stand spots: not in the cell being filled, 1.6 above a fence (its collision box is 1.5 high), inside
+  the room when underground, and never down a shaft that already has its ladder (sneaking holds on it).
+- Many interchangeable options spread Jev's probability thin (0.06 to 0.16 over ten cells to dig)
+  without any doubt behind it.
 
 ## Limits
 

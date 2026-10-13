@@ -200,13 +200,13 @@ public final class Dev {
    // Blocks around the player, for an agent that decides from state instead of from the picture.
    var near=new JsonArray();var at=mc.player.blockPosition();
    for(var pos:net.minecraft.core.BlockPos.betweenClosed(at.offset(-6,-5,-6),at.offset(6,5,6))){
-    var state=mc.level.getBlockState(pos);if(state.isAir()||state.is(net.minecraft.world.level.block.Blocks.LIGHT)||near.size()>=900)continue;
+    var state=mc.level.getBlockState(pos);if(state.isAir()||near.size()>=1400)continue;
     var entry=new JsonArray();entry.add(pos.getX());entry.add(pos.getY());entry.add(pos.getZ());
     entry.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath());
     // Direction, delay and power of redstone parts, so a build can be checked without the picture.
+    // The state of blocks that have one (direction, half, delay, power), so a build can be checked without the picture.
     var text=state.toString();int bracket=text.indexOf('[');
-    if(bracket>0&&(state.getBlock() instanceof net.minecraft.world.level.block.piston.PistonBaseBlock||state.getBlock() instanceof net.minecraft.world.level.block.DiodeBlock
-      ||state.getBlock() instanceof net.minecraft.world.level.block.ButtonBlock||state.getBlock() instanceof net.minecraft.world.level.block.RedstoneWireBlock))entry.add(text.substring(bracket));
+    if(bracket>0&&text.length()-bracket<90)entry.add(text.substring(bracket));
     near.add(entry);
    }
    s.add("blocks",near);
