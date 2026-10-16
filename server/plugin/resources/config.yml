@@ -37,7 +37,7 @@ areas:
 # Offered as links when someone tries to build in the hub.
 featured-areas: [field, kakariko, lake, ranch, valley]
 # /zelda adult
-adult-items: [master_sword, biggoron_sword, fairy_bow, fire_arrow, ice_arrow, light_arrow, hookshot, longshot, bomb, bombchu, megaton_hammer, dins_fire, farores_wind, nayrus_love, lens_of_truth, ocarina_of_time]
+adult-items: [master_sword, biggoron_sword, hylian_shield, mirror_shield, fairy_bow, fire_arrow, ice_arrow, light_arrow, hookshot, longshot, bomb, bombchu, megaton_hammer, dins_fire, farores_wind, nayrus_love, lens_of_truth, ocarina_of_time]
 # /shop: item, how many, price. Players earn money with /sell (prices in Essentials' worth.yml).
 shop:
   - oak_log 16 20

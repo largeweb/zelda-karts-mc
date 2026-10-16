@@ -19,5 +19,8 @@
  {"id": 19, "key": "nayrus_love", "name": "Nayru's Love", "icon": "gItemIconNayrusLoveTex"},
  {"id": 59, "key": "kokiri_sword", "name": "Kokiri Sword", "icon": "gItemIconSwordKokiriTex"},
  {"id": 60, "key": "master_sword", "name": "Master Sword", "icon": "gItemIconSwordMasterTex"},
- {"id": 61, "key": "biggoron_sword", "name": "Biggoron's Sword", "icon": "gItemIconSwordBiggoronTex"}
+ {"id": 61, "key": "biggoron_sword", "name": "Biggoron's Sword", "icon": "gItemIconSwordBiggoronTex"},
+ {"id": 62, "key": "deku_shield", "name": "Deku Shield", "icon": "gItemIconShieldDekuTex"},
+ {"id": 63, "key": "hylian_shield", "name": "Hylian Shield", "icon": "gItemIconShieldHylianTex"},
+ {"id": 64, "key": "mirror_shield", "name": "Mirror Shield", "icon": "gItemIconShieldMirrorTex"}
 ]

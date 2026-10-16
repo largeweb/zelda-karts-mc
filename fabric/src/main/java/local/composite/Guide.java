@@ -20,6 +20,7 @@ public final class Guide {
    "Zelda items are in Creative under Tools & Utilities, or search by name.",
    "Holding one puts it in Link's hand; you do not need to have earned it.",
    "Swords: left click slashes, right click raises the shield.",
+   "Shields: right click puts one on Link's arm; it stays there after you put the item away.",
    "Bow, slingshot, hookshot: hold right click to aim, release to fire where you look.",
    "Bombs, magic and other items: right click to use.",
    "O plays the ocarina; arrow keys are the notes and Space is A.",

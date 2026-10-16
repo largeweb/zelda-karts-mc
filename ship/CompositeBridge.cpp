@@ -662,6 +662,13 @@ void combat() {
 }
 
 bool isSword(uint32_t item) { return item >= ITEM_SWORD_KOKIRI && item <= ITEM_SWORD_BGS; }
+bool isShield(uint32_t item) { return item >= ITEM_SHIELD_DEKU && item <= ITEM_SHIELD_MIRROR; }
+// Right click with a shield puts it on Link's arm; it stays there after the item leaves the hand.
+void equipShield(uint32_t shield) {
+    gSaveContext.inventory.equipment |= gBitFlags[shield - ITEM_SHIELD_DEKU] << gEquipShifts[EQUIP_TYPE_SHIELD];
+    Inventory_ChangeEquipment(EQUIP_TYPE_SHIELD, shield - ITEM_SHIELD_DEKU + 1);
+    Player_SetEquipmentData(gPlayState, link());
+}
 // The held Minecraft item decides what Link has in hand. Ownership is not checked.
 void equipHeld(uint32_t held) {
     u8 wanted = isSword(held) ? (u8)held : (u8)ITEM_NONE;
@@ -778,7 +785,9 @@ void bridgePlay() {
     if ((b & KEY_JUMP) && (nativeUI || (storyPort.flags & FLAG_INSTRUMENT))) pad |= BTN_A;
     // A held Zelda item: attack swings a sword, use fires or raises whatever is in hand.
     if (b & KEY_ATTACK) pad |= BTN_B;
-    if (b & KEY_USE) pad |= isSword(held) ? BTN_R : held < ITEM_SWORD_KOKIRI ? BTN_CLEFT : BTN_A;
+    if (isShield(held)) {
+        if ((press & KEY_USE) && free) equipShield(held);
+    } else if (b & KEY_USE) pad |= isSword(held) ? BTN_R : held < ITEM_SWORD_KOKIRI ? BTN_CLEFT : BTN_A;
     // The game keeps Link in its aiming stance after a shot until A is pressed. Putting
     // the item away (another hotbar slot) is that press.
     static uint32_t heldBefore = ITEM_NONE;
